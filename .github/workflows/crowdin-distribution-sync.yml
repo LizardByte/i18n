@@ -1,0 +1,88 @@
+---
+# Syncs Crowdin distribution files from distributions.crowdin.net to a
+# dedicated git branch (dist) served via jsDelivr CDN.
+#
+# proxy-translator.js fetches manifest.json, languages.json and all translation
+# JSON files from https://distributions.crowdin.net.  Those requests count
+# against the LizardByte Crowdin free-tier quota, so we mirror the content
+# here (refreshed daily) and redirect browser fetch() calls to jsDelivr via
+# the interceptor in src/js/crowdin.js.
+#
+# jsDelivr CDN URL pattern:
+#   https://cdn.jsdelivr.net/gh/LizardByte/i18n@dist/<hash>/…
+#
+# jsDelivr guarantees Access-Control-Allow-Origin: * on all responses, which
+# means no CORS plugin is required in consumer pages.
+
+name: Sync Crowdin Distribution
+permissions: {}
+
+on:
+  schedule:
+    # Run daily at 02:00 UTC so translations are fresh at the start of each day.
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow ad-hoc manual runs
+
+# Only one deployment at a time; do not cancel an in-progress run.
+concurrency:
+  group: crowdin-dist-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync distributions to crowdin-dist branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    environment:
+      name: crowdin-dist
+      url: ${{ github.server_url }}/${{ github.repository }}/tree/dist
+    if: github.repository_owner == 'LizardByte'  # don't run for forks
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          token: ${{ secrets.GH_BOT_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 'node'
+
+      - name: Download Crowdin distribution files
+        env:
+          CROWDIN_DISTRIBUTION_IDS: ${{ vars.CROWDIN_DISTRIBUTION_IDS }}
+          OUTPUT_DIR: /tmp/dist
+        run: node src/sync-crowdin-distribution.cjs
+
+      - name: Commit and push to dist branch
+        env:
+          GH_BOT_NAME: ${{ vars.GH_BOT_NAME }}
+          GH_BOT_EMAIL: ${{ secrets.GH_BOT_EMAIL }}
+        run: |
+          git config user.name "${GH_BOT_NAME}"
+          git config user.email "${GH_BOT_EMAIL}"
+
+          # Create an orphan branch so the branch contains only distribution
+          # files with no history from main (keeps the branch lean).
+          git checkout --orphan dist
+
+          # Remove every file that was inherited from the main checkout.
+          git rm -rf . --quiet
+
+          # Clean up any remaining untracked files / directories.
+          git clean -fdx
+
+          # Populate the branch with the freshly downloaded distribution files.
+          cp -r /tmp/dist/. .
+
+          git add .
+
+          # Only commit when there are actual changes.
+          if git diff --staged --quiet; then
+            echo "No changes – distribution files are already up to date."
+          else
+            git commit -m "chore: sync Crowdin distributions"
+            git push origin dist --force
+          fi
