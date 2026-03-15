@@ -1,0 +1,63 @@
+---
+# Syncs source-string issues from Crowdin to this repository's GitHub Issues.
+#
+# Each GitHub issue created by this workflow contains a hidden HTML comment
+# acting as a deduplication key:
+#
+#   <!-- crowdin-issue-id:PROJECT_ID:ISSUE_ID -->
+#
+# On every run the script reads all GitHub issues carrying the "crowdin" label
+# and compares them against the live Crowdin data:
+#
+#   • Creates a new GitHub issue for each open Crowdin issue with no matching
+#     GitHub issue.
+#   • Closes a GitHub issue when the corresponding Crowdin issue is resolved.
+#   • Re-opens a GitHub issue when a resolved Crowdin issue is re-opened.
+#
+# Required GitHub repository configuration:
+#   secrets.CROWDIN_TOKEN        – Crowdin personal access token
+#   secrets.GH_BOT_TOKEN         – GitHub PAT with "issues: write" permission
+#   vars.CROWDIN_PROJECT_IDS     – Comma-separated list of Crowdin project IDs
+#                                  (e.g. "123456" or "123456,789012")
+
+name: Sync Crowdin Issues
+permissions: {}
+
+on:
+  schedule:
+    # Run every 6 hours so issues stay reasonably fresh.
+    - cron: '0 */6 * * *'
+  workflow_dispatch:  # Allow ad-hoc manual runs
+
+# Only one sync at a time; never cancel an in-progress run.
+concurrency:
+  group: crowdin-issues-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync Crowdin issues to GitHub Issues
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read  # needed by the checkout action
+    if: github.repository_owner == 'LizardByte'  # don't run for forks
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 'node'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Sync Crowdin issues to GitHub Issues
+        env:
+          CROWDIN_TOKEN: ${{ secrets.CROWDIN_TOKEN }}
+          CROWDIN_PROJECT_IDS: ${{ vars.CROWDIN_PROJECT_IDS }}
+          GH_BOT_TOKEN: ${{ secrets.GH_BOT_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: node src/sync-crowdin-issues.js
