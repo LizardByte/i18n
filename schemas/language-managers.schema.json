@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Language Managers",
+  "description": "Maps Crowdin language IDs to their language managers across platforms.",
+  "type": "object",
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference URI."
+    }
+  },
+  "patternProperties": {
+    "^[a-z]{2}(-[A-Za-z]{2,})?$": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "description": "A single language manager entry.",
+        "properties": {
+          "discord": {
+            "type": "string",
+            "description": "Discord username of the manager.",
+            "minLength": 1
+          },
+          "crowdin": {
+            "type": "string",
+            "description": "Crowdin username of the manager.",
+            "minLength": 1
+          },
+          "github": {
+            "type": ["string", "null"],
+            "description": "GitHub username of the manager, or null if not available.",
+            "minLength": 1
+          }
+        },
+        "required": ["discord", "crowdin", "github"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

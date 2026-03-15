@@ -19,9 +19,7 @@ const {
   CONCURRENCY,
 } = require('../src/sync-crowdin-distribution.cjs');
 
-// ---------------------------------------------------------------------------
 // Constants
-// ---------------------------------------------------------------------------
 
 describe('constants', () => {
   it('BASE_CDN points at the Crowdin distributions endpoint', () => {
@@ -35,9 +33,7 @@ describe('constants', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // collectBody
-// ---------------------------------------------------------------------------
 
 describe('collectBody', () => {
   it('resolves with the concatenated buffer from all data events', async () => {
@@ -65,9 +61,7 @@ describe('collectBody', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // processInBatches
-// ---------------------------------------------------------------------------
 
 describe('processInBatches', () => {
   it('calls fn for every item', async () => {
@@ -101,9 +95,7 @@ describe('processInBatches', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // saveFile
-// ---------------------------------------------------------------------------
 
 describe('saveFile', () => {
   const fs = require('node:fs');
@@ -140,9 +132,7 @@ describe('saveFile', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // fetchUrl
-// ---------------------------------------------------------------------------
 
 describe('fetchUrl', () => {
   const https = require('node:https');
@@ -283,9 +273,7 @@ describe('fetchUrl', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // syncDistribution (integration-style with mocked I/O)
-// ---------------------------------------------------------------------------
 
 describe('syncDistribution', () => {
   const https = require('node:https');
@@ -454,9 +442,7 @@ describe('syncDistribution', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // main
-// ---------------------------------------------------------------------------
 
 describe('main', () => {
   const https = require('node:https');

@@ -3,11 +3,14 @@
  * Syncs source-string issues from the Crowdin API to this repository's GitHub Issues.
  *
  * The script is fully idempotent – each run will:
- *   • Create a new GitHub issue for every open Crowdin issue that has no
- *     corresponding GitHub issue yet.
+ *   • Create a new GitHub issue for every Crowdin issue that has no
+ *     corresponding GitHub issue yet (including already-resolved ones, which
+ *     are created and immediately closed).
  *   • Close a GitHub issue when the matching Crowdin issue has been resolved.
  *   • Re-open a GitHub issue when a previously-resolved Crowdin issue is
  *     re-opened.
+ *   • Refresh the body of any GitHub issue whose content is stale.
+ *   • Assign the GitHub issue to the language managers on creation.
  *
  * Deduplication is achieved by embedding a hidden HTML comment in every
  * GitHub issue body:
@@ -30,8 +33,13 @@
  */
 
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 import { Client as CrowdinClient } from '@crowdin/crowdin-api-client';
 import { Octokit } from '@octokit/rest';
+
+const _require = createRequire(import.meta.url);
+/** @type {Record<string, Array<{discord: string, crowdin: string, github: string|null}>>} */
+const languageManagers = _require('../language-managers.json');
 
 // Determine whether this module is being run directly.
 const _isMain = process.argv[1] === fileURLToPath(import.meta.url);
@@ -165,6 +173,25 @@ async function createGithubIssue(title, body) {
 }
 
 /**
+ * Adds assignees to an existing GitHub issue.
+ * Must be called after the issue body has been posted so that GitHub
+ * recognizes the @mentions and permits the assignment.
+ *
+ * @param {number}   issueNumber
+ * @param {string[]} assignees    GitHub usernames to assign (may be empty).
+ * @returns {Promise<void>}
+ */
+async function addGithubAssignees(issueNumber, assignees) {
+  if (assignees.length === 0) return;
+  await octokit.rest.issues.addAssignees({
+    owner: GH_OWNER,
+    repo: GH_REPO,
+    issue_number: issueNumber,
+    assignees,
+  });
+}
+
+/**
  * Applies a partial update (PATCH) to an existing GitHub issue.
  *
  * @param {number} issueNumber  GitHub issue number.
@@ -189,6 +216,34 @@ const TYPE_MAP = {
   context_request: 'Context Request',
   source_mistake: 'Source Mistake',
 };
+
+/**
+ * Returns the language managers for a given Crowdin language ID.
+ * Crowdin may use either hyphens (e.g. "pt-BR") or underscores ("pt_BR");
+ * both are normalized to hyphens when looking up the managers map.
+ *
+ * @param {string|null|undefined} languageId  Crowdin language ID.
+ * @returns {Array<{discord: string, crowdin: string, github: string|null}>}
+ */
+function getLanguageManagers(languageId) {
+  if (!languageId) return [];
+  // Normalize separator: Crowdin sometimes returns "pt_BR"; the JSON uses "pt-BR".
+  const normalised = languageId.replace('_', '-');
+  return languageManagers[normalised] ?? languageManagers[languageId] ?? [];
+}
+
+/**
+ * Returns the GitHub usernames of all managers for a language that have a
+ * non-null github field. Used to populate issue assignees.
+ *
+ * @param {string|null|undefined} languageId
+ * @returns {string[]}
+ */
+function getGithubAssignees(languageId) {
+  return getLanguageManagers(languageId)
+    .map((m) => m.github)
+    .filter(Boolean);
+}
 
 /**
  * Builds the GitHub issue title from a Crowdin issue object.
@@ -229,8 +284,6 @@ function buildIssueBody(crowdinIssue, projectId) {
     ? new Date(crowdinIssue.createdAt).toUTCString()
     : '—';
 
-  const status = crowdinIssue.issueStatus === 'resolved' ? '✅ Resolved' : '🔴 Unresolved';
-
   // Render the source string if available.
   let sourceString;
   if (crowdinIssue.string?.text) {
@@ -241,6 +294,18 @@ function buildIssueBody(crowdinIssue, projectId) {
 
   const crowdinUrl = `https://crowdin.com/project/${projectId}`;
 
+  // Build the language managers section.
+  const managers = getLanguageManagers(crowdinIssue.languageId);
+  let managersSection = '';
+  if (managers.length > 0) {
+    const managerLines = managers.map((m) => {
+      const crowdinLink = `[${m.crowdin}](https://crowdin.com/profile/${m.crowdin})`;
+      const githubMention = m.github ? `@${m.github}` : m.discord;
+      return `- ${githubMention} (Crowdin: ${crowdinLink})`;
+    });
+    managersSection = ['### Language Managers', '', ...managerLines, ''].join('\n');
+  }
+
   // Hidden deduplication marker – must remain the last line of the body.
   const marker = `<!-- crowdin-issue-id:${projectId}:${crowdinIssue.id} -->`;
 
@@ -250,7 +315,6 @@ function buildIssueBody(crowdinIssue, projectId) {
     '| Field | Value |',
     '|-------|-------|',
     `| **Type** | ${type} |`,
-    `| **Status** | ${status} |`,
     `| **Language** | ${lang} |`,
     `| **Reporter** | ${reporter} |`,
     `| **Created** | ${created} |`,
@@ -266,6 +330,7 @@ function buildIssueBody(crowdinIssue, projectId) {
     '',
     '---',
     '',
+    ...(managersSection ? [managersSection] : []),
     `🔗 [View on Crowdin](${crowdinUrl})`,
     '',
     marker,
@@ -273,6 +338,69 @@ function buildIssueBody(crowdinIssue, projectId) {
 }
 
 // Sync logic
+
+/**
+ * Syncs an existing GitHub issue against the current Crowdin issue state.
+ * Updates the body if stale, and opens/closes the issue to match Crowdin.
+ *
+ * @param {object} ghIssue      Existing GitHub issue object from the map.
+ * @param {object} crowdinIssue Current Crowdin issue data.
+ * @param {string|number} projectId
+ */
+async function syncExistingIssue(ghIssue, crowdinIssue, projectId) {
+  const ghOpen = ghIssue.state === 'open';
+  const isResolved = crowdinIssue.issueStatus === 'resolved';
+
+  // Both already in the desired final state — nothing to do.
+  if (!ghOpen && isResolved) {
+    console.log(`  ✔  In sync  GH #${ghIssue.number} ← Crowdin #${crowdinIssue.id}`);
+    return;
+  }
+
+  const expectedBody = buildIssueBody(crowdinIssue, projectId);
+  const bodyPatch = ghIssue.body === expectedBody ? {} : { body: expectedBody };
+
+  if (isResolved && ghOpen) {
+    await updateGithubIssue(ghIssue.number, { state: 'closed', state_reason: 'completed', ...bodyPatch });
+    console.log(`  ✖  Closed   GH #${ghIssue.number} ← Crowdin #${crowdinIssue.id} resolved`);
+  } else if (!isResolved && !ghOpen) {
+    await updateGithubIssue(ghIssue.number, { state: 'open', ...bodyPatch });
+    console.log(`  ↺  Reopened GH #${ghIssue.number} ← Crowdin #${crowdinIssue.id} re-opened`);
+  } else if (Object.keys(bodyPatch).length > 0) {
+    await updateGithubIssue(ghIssue.number, bodyPatch);
+    console.log(`  ✎  Updated  GH #${ghIssue.number} ← Crowdin #${crowdinIssue.id} body refreshed`);
+  } else {
+    console.log(`  ✔  In sync  GH #${ghIssue.number} ← Crowdin #${crowdinIssue.id}`);
+  }
+}
+
+/**
+ * Creates a new GitHub issue for a Crowdin issue, assigns it to language
+ * managers, and immediately closes it if already resolved on Crowdin.
+ *
+ * @param {object}           crowdinIssue
+ * @param {string|number}    projectId
+ * @param {Map<string, object>} existingMap  Mutated in-place with the new issue.
+ * @param {string}           key            Map key for this issue.
+ */
+async function createNewIssue(crowdinIssue, projectId, existingMap, key) {
+  const assignees = getGithubAssignees(crowdinIssue.languageId);
+  const gh = await createGithubIssue(
+    buildIssueTitle(crowdinIssue),
+    buildIssueBody(crowdinIssue, projectId),
+  );
+  existingMap.set(key, gh);
+  console.log(`  ✚  Created  GH #${gh.number} ← Crowdin #${crowdinIssue.id}`);
+
+  // Assign after creation so GitHub can resolve the @mentions in the body
+  // before the assignment request is made.
+  await addGithubAssignees(gh.number, assignees);
+
+  if (crowdinIssue.issueStatus === 'resolved') {
+    await updateGithubIssue(gh.number, { state: 'closed', state_reason: 'completed' });
+    console.log(`  ✖  Closed   GH #${gh.number} ← Crowdin #${crowdinIssue.id} resolved (on create)`);
+  }
+}
 
 /**
  * Syncs all issues for a single Crowdin project against the pre-loaded map
@@ -290,34 +418,11 @@ async function syncProject(projectId, existingMap) {
   for (const issue of issues) {
     const key = `${projectId}:${issue.id}`;
     const ghIssue = existingMap.get(key);
-    const isResolved = issue.issueStatus === 'resolved';
 
     if (ghIssue) {
-      // Existing issue – check state alignment.
-      const ghOpen = ghIssue.state === 'open';
-
-      if (isResolved && ghOpen) {
-        await updateGithubIssue(ghIssue.number, {
-          state: 'closed',
-          state_reason: 'completed',
-        });
-        console.log(`  ✖  Closed   GH #${ghIssue.number} ← Crowdin #${issue.id} resolved`);
-      } else if (!isResolved && !ghOpen) {
-        await updateGithubIssue(ghIssue.number, { state: 'open' });
-        console.log(`  ↺  Reopened GH #${ghIssue.number} ← Crowdin #${issue.id} re-opened`);
-      } else {
-        console.log(`  ✔  In sync  GH #${ghIssue.number} ← Crowdin #${issue.id}`);
-      }
-    } else if (isResolved) {
-      // No point creating a GitHub issue for something already resolved.
-      console.log(`  ·  Skipped  (Crowdin #${issue.id} – already resolved, no GH issue)`);
+      await syncExistingIssue(ghIssue, issue, projectId);
     } else {
-      const gh = await createGithubIssue(
-        buildIssueTitle(issue),
-        buildIssueBody(issue, projectId),
-      );
-      existingMap.set(key, gh);
-      console.log(`  ✚  Created  GH #${gh.number} ← Crowdin #${issue.id}`);
+      await createNewIssue(issue, projectId, existingMap, key);
     }
 
     // Brief pause to stay well within GitHub's secondary rate limits.
@@ -362,10 +467,15 @@ export {
   ensureCrowdinLabel,
   loadExistingGithubIssues,
   createGithubIssue,
+  addGithubAssignees,
   updateGithubIssue,
   syncProject,
+  syncExistingIssue,
+  createNewIssue,
   main,
   TYPE_MAP,
   MARKER_RE,
   CROWDIN_LABEL,
+  getLanguageManagers,
+  getGithubAssignees,
 };

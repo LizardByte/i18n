@@ -7,7 +7,6 @@ import {
   afterEach,
 } from '@jest/globals';
 
-// ---------------------------------------------------------------------------
 // Module-level mocks
 //
 // jest.mock() factories are hoisted to the very top of the compiled output,
@@ -18,7 +17,6 @@ import {
 // has been imported (so its singletons are initialised), extract the specific
 // jest.fn() instances from the constructed objects via the constructor's
 // .mock.results.
-// ---------------------------------------------------------------------------
 
 jest.mock('@crowdin/crowdin-api-client', () => ({
   Client: jest.fn().mockImplementation(() => ({
@@ -37,12 +35,32 @@ jest.mock('@octokit/rest', () => ({
         createLabel: jest.fn().mockResolvedValue({}),
         create: jest.fn().mockResolvedValue({ data: { number: 1 } }),
         update: jest.fn().mockResolvedValue({ data: {} }),
+        addAssignees: jest.fn().mockResolvedValue({}),
         listForRepo: jest.fn(),
       },
     },
     paginate: jest.fn().mockResolvedValue([]),
   })),
 }));
+
+// Mock language-managers.json so tests never depend on real usernames.
+jest.mock('../language-managers.json', () => ({
+  // Single manager, github same as discord
+  'xx': [{ discord: 'fake-discord', crowdin: 'fake-crowdin', github: 'fake-github' }],
+  // Multiple managers
+  'yy': [
+    { discord: 'fake-discord-a', crowdin: 'fake-crowdin-a', github: 'fake-github-a' },
+    { discord: 'fake-discord-b', crowdin: 'fake-crowdin-b', github: 'fake-github-b' },
+  ],
+  // Discord and crowdin differ from github
+  'zz': [{ discord: 'fake-discord-c', crowdin: 'fake-crowdin-c', github: 'fake-github-c' }],
+  // Manager with null github
+  'ngh': [{ discord: 'fake-discord-ngh', crowdin: 'fake-crowdin-ngh', github: null }],
+  // Hyphen-normalised variant (pt-BR style)
+  'xx-BB': [{ discord: 'fake-discord-d', crowdin: 'fake-crowdin-d', github: 'fake-github-d' }],
+  // No managers (Afar — used as the "no managers" test language)
+  'aa': [],
+}), { virtual: false });
 
 // Import the mocked constructors so we can inspect .mock.results
 import { Client as CrowdinClient } from '@crowdin/crowdin-api-client';
@@ -55,18 +73,21 @@ import {
   ensureCrowdinLabel,
   loadExistingGithubIssues,
   createGithubIssue,
+  addGithubAssignees,
   updateGithubIssue,
   syncProject,
+  syncExistingIssue,
+  createNewIssue,
   main,
   TYPE_MAP,
   MARKER_RE,
   CROWDIN_LABEL,
+  getLanguageManagers,
+  getGithubAssignees,
 } from '../src/sync-crowdin-issues.js';
 
-// ---------------------------------------------------------------------------
 // Extract mock fn references from the singleton instances created at module
 // load time (the first constructor call in .mock.results[0].value).
-// ---------------------------------------------------------------------------
 
 /** The Octokit instance that the module captured. */
 const _octokitInst = Octokit.mock.results[0].value;
@@ -83,11 +104,10 @@ mockWithFetchAll.mockReturnValue({ listStringComments: mockListStringCommentsSta
 const mockCreateLabel = _octokitInst.rest.issues.createLabel;
 const mockCreate = _octokitInst.rest.issues.create;
 const mockUpdate = _octokitInst.rest.issues.update;
+const mockAddAssignees = _octokitInst.rest.issues.addAssignees;
 const mockPaginate = _octokitInst.paginate;
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 /** Build a minimal Crowdin issue object. */
 function makeCrowdinIssue(overrides = {}) {
@@ -95,7 +115,7 @@ function makeCrowdinIssue(overrides = {}) {
     id: 1,
     issueType: 'source_mistake',
     issueStatus: 'unresolved',
-    languageId: 'fr',
+    languageId: 'aa',
     text: 'Some issue text',
     user: { username: 'testuser', fullName: 'Test User' },
     createdAt: '2024-06-01T00:00:00Z',
@@ -114,9 +134,7 @@ function makeGhIssue(overrides = {}) {
   };
 }
 
-// ---------------------------------------------------------------------------
 // TYPE_MAP
-// ---------------------------------------------------------------------------
 
 describe('TYPE_MAP', () => {
   it('contains expected keys', () => {
@@ -129,9 +147,7 @@ describe('TYPE_MAP', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // CROWDIN_LABEL
-// ---------------------------------------------------------------------------
 
 describe('CROWDIN_LABEL', () => {
   it('is the string "crowdin"', () => {
@@ -139,9 +155,7 @@ describe('CROWDIN_LABEL', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // MARKER_RE
-// ---------------------------------------------------------------------------
 
 describe('MARKER_RE', () => {
   it('matches a valid marker and captures project and issue IDs', () => {
@@ -158,9 +172,7 @@ describe('MARKER_RE', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // buildIssueTitle
-// ---------------------------------------------------------------------------
 
 describe('buildIssueTitle', () => {
   it('returns a title with known issue type and language', () => {
@@ -198,19 +210,91 @@ describe('buildIssueTitle', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
+// getLanguageManagers
+
+describe('getLanguageManagers', () => {
+  it('returns managers for a known single-manager language', () => {
+    const managers = getLanguageManagers('xx');
+    expect(managers).toHaveLength(1);
+    expect(managers[0]).toMatchObject({ discord: 'fake-discord', crowdin: 'fake-crowdin', github: 'fake-github' });
+  });
+
+  it('returns multiple managers for a language with multiple managers', () => {
+    const managers = getLanguageManagers('yy');
+    expect(managers).toHaveLength(2);
+    expect(managers.map((m) => m.discord)).toContain('fake-discord-a');
+    expect(managers.map((m) => m.discord)).toContain('fake-discord-b');
+  });
+
+  it('returns a manager entry with a null github field', () => {
+    const managers = getLanguageManagers('ngh');
+    expect(managers).toHaveLength(1);
+    expect(managers[0].github).toBeNull();
+  });
+
+  it('normalises underscore separators (e.g. xx_BB → xx-BB)', () => {
+    const withHyphen = getLanguageManagers('xx-BB');
+    const withUnderscore = getLanguageManagers('xx_BB');
+    expect(withHyphen).toEqual(withUnderscore);
+    expect(withHyphen).toHaveLength(1);
+  });
+
+  it('returns an empty array for a language with no managers (Afar)', () => {
+    expect(getLanguageManagers('aa')).toEqual([]);
+  });
+
+  it('returns an empty array for an unknown language', () => {
+    expect(getLanguageManagers('zz-unknown')).toEqual([]);
+  });
+
+  it('returns an empty array when languageId is null or undefined', () => {
+    expect(getLanguageManagers(null)).toEqual([]);
+    expect(getLanguageManagers(undefined)).toEqual([]);
+  });
+});
+
+// getGithubAssignees
+
+describe('getGithubAssignees', () => {
+  it('returns github usernames for managers with non-null github', () => {
+    expect(getGithubAssignees('xx')).toEqual(['fake-github']);
+  });
+
+  it('returns multiple usernames for a language with multiple managers', () => {
+    expect(getGithubAssignees('yy')).toEqual(['fake-github-a', 'fake-github-b']);
+  });
+
+  it('omits managers where github is null', () => {
+    expect(getGithubAssignees('ngh')).toEqual([]);
+  });
+
+  it('returns an empty array for a language with no managers', () => {
+    expect(getGithubAssignees('aa')).toEqual([]);
+  });
+
+  it('returns an empty array for an unknown language', () => {
+    expect(getGithubAssignees('zz-unknown')).toEqual([]);
+  });
+
+  it('returns an empty array when languageId is null or undefined', () => {
+    expect(getGithubAssignees(null)).toEqual([]);
+    expect(getGithubAssignees(undefined)).toEqual([]);
+  });
+});
+
 // buildIssueBody
-// ---------------------------------------------------------------------------
 
 describe('buildIssueBody', () => {
   const projectId = '9876';
 
+  // Use 'aa' (Afar — a fake/no-managers test language) as the base so
+  // manager-unrelated tests remain isolated from the managers section.
   const baseIssue = {
     id: 42,
     issueType: 'source_mistake',
     issueStatus: 'unresolved',
-    languageId: 'es',
-    user: { username: 'johndoe', fullName: 'John Doe' },
+    languageId: 'aa',
+    user: { username: 'testuser', fullName: 'Test User' },
     createdAt: '2024-01-15T10:30:00Z',
     text: 'This source text has a mistake.',
     string: { text: 'Original source string here' },
@@ -233,22 +317,20 @@ describe('buildIssueBody', () => {
     expect(body).toContain('unknown_type');
   });
 
-  it('shows unresolved status', () => {
-    expect(buildIssueBody({ ...baseIssue, issueStatus: 'unresolved' }, projectId)).toContain('🔴 Unresolved');
-  });
-
-  it('shows resolved status', () => {
-    expect(buildIssueBody({ ...baseIssue, issueStatus: 'resolved' }, projectId)).toContain('✅ Resolved');
+  it('does not include a Status field', () => {
+    expect(buildIssueBody(baseIssue, projectId)).not.toContain('**Status**');
   });
 
   it('renders a username as a Crowdin profile link', () => {
-    expect(buildIssueBody(baseIssue, projectId)).toContain('[@johndoe](https://crowdin.com/profile/johndoe)');
+    expect(buildIssueBody(baseIssue, projectId)).toContain('[@testuser](https://crowdin.com/profile/testuser)');
   });
 
   it('falls back to fullName when username is absent', () => {
-    const body = buildIssueBody({ ...baseIssue, user: { fullName: 'Jane Smith' } }, projectId);
-    expect(body).toContain('Jane Smith');
-    expect(body).not.toContain('@');
+    const body = buildIssueBody({ ...baseIssue, user: { fullName: 'Test Fullname' } }, projectId);
+    expect(body).toContain('Test Fullname');
+    // The reporter row should not contain a @ mention (no Crowdin profile link).
+    const reporterRow = body.split('\n').find((l) => l.includes('**Reporter**'));
+    expect(reporterRow).not.toContain('@');
   });
 
   it('shows — when user is absent', () => {
@@ -293,11 +375,46 @@ describe('buildIssueBody', () => {
   it('includes the Crowdin ID in the table', () => {
     expect(buildIssueBody(baseIssue, projectId)).toContain(`| **Crowdin ID** | ${baseIssue.id} |`);
   });
+
+  it('includes a Language Managers section with GitHub mention when managers exist', () => {
+    const body = buildIssueBody({ ...baseIssue, languageId: 'xx' }, projectId);
+    expect(body).toContain('### Language Managers');
+    expect(body).toContain('@fake-github');
+    expect(body).toContain('https://crowdin.com/profile/fake-crowdin');
+  });
+
+  it('includes multiple GitHub mentions for a language with multiple managers', () => {
+    const body = buildIssueBody({ ...baseIssue, languageId: 'yy' }, projectId);
+    expect(body).toContain('@fake-github-a');
+    expect(body).toContain('@fake-github-b');
+  });
+
+  it('shows discord name instead of @ mention when github is null', () => {
+    const body = buildIssueBody({ ...baseIssue, languageId: 'ngh' }, projectId);
+    expect(body).toContain('### Language Managers');
+    // Should show the discord name, not @null
+    expect(body).toContain('fake-discord-ngh');
+    expect(body).not.toContain('@null');
+  });
+
+  it('omits Language Managers section when language has no managers', () => {
+    const body = buildIssueBody({ ...baseIssue, languageId: 'aa' }, projectId);
+    expect(body).not.toContain('### Language Managers');
+  });
+
+  it('omits Language Managers section when languageId is absent', () => {
+    const body = buildIssueBody({ ...baseIssue, languageId: undefined }, projectId);
+    expect(body).not.toContain('### Language Managers');
+  });
+
+  it('places the marker as the last line even when managers section is present', () => {
+    const body = buildIssueBody({ ...baseIssue, languageId: 'xx' }, projectId);
+    const lines = body.split('\n');
+    expect(MARKER_RE.test(lines[lines.length - 1])).toBe(true);
+  });
 });
 
-// ---------------------------------------------------------------------------
 // fetchCrowdinIssues
-// ---------------------------------------------------------------------------
 
 describe('fetchCrowdinIssues', () => {
   beforeEach(() => jest.clearAllMocks());
@@ -329,9 +446,7 @@ describe('fetchCrowdinIssues', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // ensureCrowdinLabel
-// ---------------------------------------------------------------------------
 
 describe('ensureCrowdinLabel', () => {
   beforeEach(() => {
@@ -368,9 +483,7 @@ describe('ensureCrowdinLabel', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // loadExistingGithubIssues
-// ---------------------------------------------------------------------------
 
 describe('loadExistingGithubIssues', () => {
   beforeEach(() => jest.clearAllMocks());
@@ -413,9 +526,7 @@ describe('loadExistingGithubIssues', () => {
   });
 });
 
-// ---------------------------------------------------------------------------
 // createGithubIssue
-// ---------------------------------------------------------------------------
 
 describe('createGithubIssue', () => {
   beforeEach(() => jest.clearAllMocks());
@@ -430,29 +541,214 @@ describe('createGithubIssue', () => {
       labels: [CROWDIN_LABEL],
     }));
   });
-});
 
-// ---------------------------------------------------------------------------
-// updateGithubIssue
-// ---------------------------------------------------------------------------
-
-describe('updateGithubIssue', () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  it('calls octokit update with the correct args and returns data', async () => {
-    mockUpdate.mockResolvedValue({ data: { number: 5, state: 'closed' } });
-    const result = await updateGithubIssue(5, { state: 'closed' });
-    expect(result.state).toBe('closed');
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      issue_number: 5,
-      state: 'closed',
-    }));
+  it('does not pass assignees in the create call', async () => {
+    mockCreate.mockResolvedValue({ data: { number: 99, state: 'open' } });
+    await createGithubIssue('Title', 'Body');
+    const call = mockCreate.mock.calls[0][0];
+    expect(call).not.toHaveProperty('assignees');
   });
 });
 
-// ---------------------------------------------------------------------------
+// addGithubAssignees
+
+describe('addGithubAssignees', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('calls addAssignees with the provided usernames', async () => {
+    await addGithubAssignees(10, ['user-a', 'user-b']);
+    expect(mockAddAssignees).toHaveBeenCalledWith(expect.objectContaining({
+      issue_number: 10,
+      assignees: ['user-a', 'user-b'],
+    }));
+  });
+
+  it('does not call addAssignees when the list is empty', async () => {
+    await addGithubAssignees(10, []);
+    expect(mockAddAssignees).not.toHaveBeenCalled();
+  });
+});
+
+// syncExistingIssue
+
+describe('syncExistingIssue', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('closes an open GH issue when Crowdin issue is resolved', async () => {
+    const issue = makeCrowdinIssue({ id: 1, issueStatus: 'resolved' });
+    const ghIssue = makeGhIssue({ number: 10, state: 'open', body: buildIssueBody(issue, '42') });
+    mockUpdate.mockResolvedValue({ data: {} });
+
+    await syncExistingIssue(ghIssue, issue, '42');
+
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      state: 'closed',
+      state_reason: 'completed',
+    }));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Closed'));
+  });
+
+  it('reopens a closed GH issue when Crowdin issue is re-opened', async () => {
+    const issue = makeCrowdinIssue({ id: 2, issueStatus: 'unresolved' });
+    const ghIssue = makeGhIssue({ number: 11, state: 'closed', body: buildIssueBody(issue, '42') });
+    mockUpdate.mockResolvedValue({ data: {} });
+
+    await syncExistingIssue(ghIssue, issue, '42');
+
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ state: 'open' }));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Reopened'));
+  });
+
+  it('updates the body when stale and state already matches (open/unresolved)', async () => {
+    const issue = makeCrowdinIssue({ id: 3, issueStatus: 'unresolved' });
+    const ghIssue = makeGhIssue({ number: 12, state: 'open', body: 'stale body' });
+    mockUpdate.mockResolvedValue({ data: {} });
+
+    await syncExistingIssue(ghIssue, issue, '42');
+
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      body: buildIssueBody(issue, '42'),
+    }));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Updated'));
+  });
+
+  it('includes updated body in the close call when body is stale', async () => {
+    const issue = makeCrowdinIssue({ id: 4, issueStatus: 'resolved' });
+    const ghIssue = makeGhIssue({ number: 13, state: 'open', body: 'stale body' });
+    mockUpdate.mockResolvedValue({ data: {} });
+
+    await syncExistingIssue(ghIssue, issue, '42');
+
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      state: 'closed',
+      body: buildIssueBody(issue, '42'),
+    }));
+  });
+
+  it('includes updated body in the reopen call when body is stale', async () => {
+    const issue = makeCrowdinIssue({ id: 5, issueStatus: 'unresolved' });
+    const ghIssue = makeGhIssue({ number: 14, state: 'closed', body: 'stale body' });
+    mockUpdate.mockResolvedValue({ data: {} });
+
+    await syncExistingIssue(ghIssue, issue, '42');
+
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      state: 'open',
+      body: buildIssueBody(issue, '42'),
+    }));
+  });
+
+  it('logs "in sync" and makes no API call when state and body both match', async () => {
+    const issue = makeCrowdinIssue({ id: 6, issueStatus: 'unresolved' });
+    const ghIssue = makeGhIssue({ number: 15, state: 'open', body: buildIssueBody(issue, '42') });
+
+    await syncExistingIssue(ghIssue, issue, '42');
+
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('In sync'));
+  });
+
+  it('logs "in sync" and makes no API call when GH is closed and Crowdin is resolved (body matches)', async () => {
+    const issue = makeCrowdinIssue({ id: 7, issueStatus: 'resolved' });
+    const ghIssue = makeGhIssue({ number: 16, state: 'closed', body: buildIssueBody(issue, '42') });
+
+    await syncExistingIssue(ghIssue, issue, '42');
+
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('In sync'));
+  });
+
+  it('logs "in sync" and makes no API call when GH is closed and Crowdin is resolved (stale body skipped)', async () => {
+    // When already closed+resolved, we do not refresh the body — it is intentionally skipped.
+    const issue = makeCrowdinIssue({ id: 8, issueStatus: 'resolved' });
+    const ghIssue = makeGhIssue({ number: 17, state: 'closed', body: 'stale body' });
+
+    await syncExistingIssue(ghIssue, issue, '42');
+
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('In sync'));
+  });
+});
+
+// createNewIssue
+
+describe('createNewIssue', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('creates a GH issue and adds it to the map', async () => {
+    const issue = makeCrowdinIssue({ id: 1, issueStatus: 'unresolved' });
+    mockCreate.mockResolvedValue({ data: { number: 50, state: 'open' } });
+
+    const map = new Map();
+    await createNewIssue(issue, '42', map, '42:1');
+
+    expect(mockCreate).toHaveBeenCalled();
+    expect(map.has('42:1')).toBe(true);
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Created'));
+  });
+
+  it('passes assignees via addAssignees after creation', async () => {
+    // 'xx' has github: 'fake-github'
+    const issue = makeCrowdinIssue({ id: 2, issueStatus: 'unresolved', languageId: 'xx' });
+    mockCreate.mockResolvedValue({ data: { number: 51, state: 'open' } });
+
+    await createNewIssue(issue, '42', new Map(), '42:2');
+
+    expect(mockAddAssignees).toHaveBeenCalledWith(expect.objectContaining({
+      issue_number: 51,
+      assignees: ['fake-github'],
+    }));
+    // Assignees must NOT appear in the create call
+    expect(mockCreate).not.toHaveBeenCalledWith(expect.objectContaining({ assignees: expect.anything() }));
+  });
+
+  it('does not call addAssignees when no managers have a github username', async () => {
+    // 'ngh' has github: null
+    const issue = makeCrowdinIssue({ id: 3, issueStatus: 'unresolved', languageId: 'ngh' });
+    mockCreate.mockResolvedValue({ data: { number: 52, state: 'open' } });
+
+    await createNewIssue(issue, '42', new Map(), '42:3');
+
+    expect(mockAddAssignees).not.toHaveBeenCalled();
+  });
+
+  it('immediately closes the issue when the Crowdin issue is already resolved', async () => {
+    const issue = makeCrowdinIssue({ id: 4, issueStatus: 'resolved' });
+    mockCreate.mockResolvedValue({ data: { number: 53, state: 'open' } });
+    mockUpdate.mockResolvedValue({ data: { number: 53, state: 'closed' } });
+
+    await createNewIssue(issue, '42', new Map(), '42:4');
+
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      issue_number: 53,
+      state: 'closed',
+      state_reason: 'completed',
+    }));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('resolved (on create)'));
+  });
+
+  it('does not close the issue when the Crowdin issue is unresolved', async () => {
+    const issue = makeCrowdinIssue({ id: 5, issueStatus: 'unresolved' });
+    mockCreate.mockResolvedValue({ data: { number: 54, state: 'open' } });
+
+    await createNewIssue(issue, '42', new Map(), '42:5');
+
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+});
+
 // syncProject
-// ---------------------------------------------------------------------------
 
 describe('syncProject', () => {
   beforeEach(() => {
@@ -485,17 +781,24 @@ describe('syncProject', () => {
     expect(map.has('42:5')).toBe(true);
   });
 
-  it('skips creating a GH issue for an already-resolved Crowdin issue not in the map', async () => {
+  it('creates and immediately closes a GH issue for an already-resolved Crowdin issue', async () => {
     const issue = makeCrowdinIssue({ id: 6, issueStatus: 'resolved' });
     mockListStringCommentsStable.mockResolvedValue({ data: [{ data: issue }] });
+    mockCreate.mockResolvedValue({ data: { number: 21, state: 'open' } });
+    mockUpdate.mockResolvedValue({ data: { number: 21, state: 'closed' } });
 
     const map = new Map();
     await runSync('42', map);
 
-    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      state: 'closed',
+      state_reason: 'completed',
+    }));
+    expect(map.has('42:6')).toBe(true);
   });
 
-  it('closes an open GH issue when the Crowdin issue becomes resolved', async () => {
+  it('delegates to syncExistingIssue for an issue already in the map', async () => {
     const issue = makeCrowdinIssue({ id: 7, issueStatus: 'resolved' });
     mockListStringCommentsStable.mockResolvedValue({ data: [{ data: issue }] });
     mockUpdate.mockResolvedValue({ data: { number: 10, state: 'closed' } });
@@ -509,49 +812,25 @@ describe('syncProject', () => {
       state_reason: 'completed',
     }));
   });
+});
 
-  it('reopens a closed GH issue when the Crowdin issue is re-opened', async () => {
-    const issue = makeCrowdinIssue({ id: 8, issueStatus: 'unresolved' });
-    mockListStringCommentsStable.mockResolvedValue({ data: [{ data: issue }] });
-    mockUpdate.mockResolvedValue({ data: { number: 11, state: 'open' } });
+// updateGithubIssue
 
-    const ghIssue = makeGhIssue({ number: 11, state: 'closed' });
-    const map = new Map([['42:8', ghIssue]]);
-    await runSync('42', map);
+describe('updateGithubIssue', () => {
+  beforeEach(() => jest.clearAllMocks());
 
-    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ state: 'open' }));
-  });
-
-  it('logs "in sync" when GH issue state already matches (open/unresolved)', async () => {
-    const issue = makeCrowdinIssue({ id: 9, issueStatus: 'unresolved' });
-    mockListStringCommentsStable.mockResolvedValue({ data: [{ data: issue }] });
-
-    const ghIssue = makeGhIssue({ number: 12, state: 'open' });
-    const map = new Map([['42:9', ghIssue]]);
-    await runSync('42', map);
-
-    expect(mockUpdate).not.toHaveBeenCalled();
-    expect(mockCreate).not.toHaveBeenCalled();
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('In sync'));
-  });
-
-  it('logs "in sync" when GH issue state already matches (closed/resolved)', async () => {
-    const issue = makeCrowdinIssue({ id: 13, issueStatus: 'resolved' });
-    mockListStringCommentsStable.mockResolvedValue({ data: [{ data: issue }] });
-
-    const ghIssue = makeGhIssue({ number: 13, state: 'closed' });
-    const map = new Map([['42:13', ghIssue]]);
-    await runSync('42', map);
-
-    expect(mockUpdate).not.toHaveBeenCalled();
-    expect(mockCreate).not.toHaveBeenCalled();
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('In sync'));
+  it('calls octokit update with the correct args and returns data', async () => {
+    mockUpdate.mockResolvedValue({ data: { number: 5, state: 'closed' } });
+    const result = await updateGithubIssue(5, { state: 'closed' });
+    expect(result.state).toBe('closed');
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      issue_number: 5,
+      state: 'closed',
+    }));
   });
 });
 
-// ---------------------------------------------------------------------------
 // main
-// ---------------------------------------------------------------------------
 
 describe('main', () => {
   beforeEach(() => {
