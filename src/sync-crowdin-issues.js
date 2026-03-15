@@ -94,6 +94,26 @@ const octokit = new Octokit({
 
 // Crowdin helpers
 
+/** Cache of projectId → project identifier (slug), populated on first use. */
+const projectSlugCache = new Map();
+
+/**
+ * Returns the Crowdin project identifier (URL slug) for the given project ID.
+ * Results are cached for the lifetime of the process.
+ *
+ * @param {string|number} projectId
+ * @returns {Promise<string>}
+ */
+async function fetchProjectSlug(projectId) {
+  if (projectSlugCache.has(String(projectId))) {
+    return projectSlugCache.get(String(projectId));
+  }
+  const { data } = await crowdin.projectsGroupsApi.getProject(projectId);
+  const slug = data.identifier;
+  projectSlugCache.set(String(projectId), slug);
+  return slug;
+}
+
 /**
  * Fetches *all* source-string issues for a project using the SDK's built-in
  * auto-pagination helper so no manual offset tracking is required.
@@ -341,11 +361,12 @@ function buildIssueTitle(crowdinIssue) {
  * The hidden marker at the bottom is required for deduplication – do not
  * remove it.
  *
- * @param {object} crowdinIssue
- * @param {string|number} projectId
+ * @param {object}        crowdinIssue
+ * @param {string|number} projectId    Numeric project ID (used in the marker).
+ * @param {string}        projectSlug  Crowdin project identifier (URL slug).
  * @returns {string}
  */
-function buildIssueBody(crowdinIssue, projectId) {
+function buildIssueBody(crowdinIssue, projectId, projectSlug) {
   const type = TYPE_MAP[crowdinIssue.issueType] ?? crowdinIssue.issueType;
   const lang = crowdinIssue.languageId ?? '—';
 
@@ -357,6 +378,10 @@ function buildIssueBody(crowdinIssue, projectId) {
     ? new Date(crowdinIssue.createdAt).toUTCString()
     : '—';
 
+  // Extra string-level metadata when available.
+  const filePath = crowdinIssue.string?.file?.path ?? crowdinIssue.string?.filePath ?? null;
+  const stringIdentifier = crowdinIssue.string?.identifier ?? null;
+
   // Render the source string if available.
   let sourceString;
   if (crowdinIssue.string?.text) {
@@ -365,7 +390,18 @@ function buildIssueBody(crowdinIssue, projectId) {
     sourceString = '_(unavailable)_';
   }
 
-  const crowdinUrl = `https://crowdin.com/project/${projectId}`;
+  // Build the deep-link URL. If we have the slug, link straight to the string
+  // in the Crowdin editor for that language; otherwise fall back to the project page.
+  // The numeric project ID is never used in URLs as it does not resolve on crowdin.com.
+  const stringId = crowdinIssue.string?.id;
+  let crowdinUrl;
+  if (projectSlug && crowdinIssue.languageId && stringId) {
+    crowdinUrl = `https://crowdin.com/editor/${projectSlug}/${crowdinIssue.languageId}#${stringId}`;
+  } else if (projectSlug) {
+    crowdinUrl = `https://crowdin.com/project/${projectSlug}`;
+  } else {
+    crowdinUrl = null;
+  }
 
   // Build the language managers section.
   const managers = getLanguageManagers(crowdinIssue.languageId);
@@ -382,16 +418,23 @@ function buildIssueBody(crowdinIssue, projectId) {
   // Hidden deduplication marker – must remain the last line of the body.
   const marker = `<!-- crowdin-issue-id:${projectId}:${crowdinIssue.id} -->`;
 
-  return [
-    '## Crowdin Issue',
-    '',
-    '| Field | Value |',
-    '|-------|-------|',
+  // Build the table rows, only including optional rows when data is available.
+  const tableRows = [
     `| **Type** | ${type} |`,
     `| **Language** | ${lang} |`,
     `| **Reporter** | ${reporter} |`,
     `| **Created** | ${created} |`,
     `| **Crowdin ID** | ${crowdinIssue.id} |`,
+  ];
+  if (filePath) tableRows.push(`| **File** | \`${filePath}\` |`);
+  if (stringIdentifier) tableRows.push(`| **String ID** | \`${stringIdentifier}\` |`);
+
+  return [
+    '## Crowdin Issue',
+    '',
+    '| Field | Value |',
+    '|-------|-------|',
+    ...tableRows,
     '',
     '### Source String',
     '',
@@ -404,8 +447,7 @@ function buildIssueBody(crowdinIssue, projectId) {
     '---',
     '',
     ...(managersSection ? [managersSection] : []),
-    `🔗 [View on Crowdin](${crowdinUrl})`,
-    '',
+    ...(crowdinUrl ? [`🔗 [View on Crowdin](${crowdinUrl})`, ''] : []),
     marker,
   ].join('\n');
 }
@@ -416,11 +458,12 @@ function buildIssueBody(crowdinIssue, projectId) {
  * Syncs an existing GitHub issue against the current Crowdin issue state.
  * Updates the body if stale, and opens/closes the issue to match Crowdin.
  *
- * @param {object} ghIssue      Existing GitHub issue object from the map.
- * @param {object} crowdinIssue Current Crowdin issue data.
- * @param {string|number} projectId
+ * @param {object}        ghIssue       Existing GitHub issue object from the map.
+ * @param {object}        crowdinIssue  Current Crowdin issue data.
+ * @param {string|number} projectId     Numeric project ID.
+ * @param {string}        projectSlug   Crowdin project identifier (URL slug).
  */
-async function syncExistingIssue(ghIssue, crowdinIssue, projectId) {
+async function syncExistingIssue(ghIssue, crowdinIssue, projectId, projectSlug) {
   const ghOpen = ghIssue.state === 'open';
   const isResolved = crowdinIssue.issueStatus === 'resolved';
 
@@ -431,7 +474,7 @@ async function syncExistingIssue(ghIssue, crowdinIssue, projectId) {
   }
 
   const expectedTitle = buildIssueTitle(crowdinIssue);
-  const expectedBody = buildIssueBody(crowdinIssue, projectId);
+  const expectedBody = buildIssueBody(crowdinIssue, projectId, projectSlug);
   const expectedLabels = buildIssueLabels(crowdinIssue);
 
   // Build a patch containing only changed fields.
@@ -466,17 +509,18 @@ async function syncExistingIssue(ghIssue, crowdinIssue, projectId) {
  * Creates a new GitHub issue for a Crowdin issue, assigns it to language
  * managers, and immediately closes it if already resolved on Crowdin.
  *
- * @param {object}           crowdinIssue
- * @param {string|number}    projectId
+ * @param {object}              crowdinIssue
+ * @param {string|number}       projectId    Numeric project ID.
+ * @param {string}              projectSlug  Crowdin project identifier (URL slug).
  * @param {Map<string, object>} existingMap  Mutated in-place with the new issue.
- * @param {string}           key            Map key for this issue.
+ * @param {string}              key          Map key for this issue.
  */
-async function createNewIssue(crowdinIssue, projectId, existingMap, key) {
+async function createNewIssue(crowdinIssue, projectId, projectSlug, existingMap, key) {
   const assignees = getGithubAssignees(crowdinIssue.languageId);
   await ensureIssueLabels(crowdinIssue);
   const gh = await createGithubIssue(
     buildIssueTitle(crowdinIssue),
-    buildIssueBody(crowdinIssue, projectId),
+    buildIssueBody(crowdinIssue, projectId, projectSlug),
     buildIssueLabels(crowdinIssue),
   );
   existingMap.set(key, gh);
@@ -502,7 +546,10 @@ async function createNewIssue(crowdinIssue, projectId, existingMap, key) {
 async function syncProject(projectId, existingMap) {
   console.log(`\n── Project ${projectId} ──`);
 
-  const issues = await fetchCrowdinIssues(projectId);
+  const [issues, projectSlug] = await Promise.all([
+    fetchCrowdinIssues(projectId),
+    fetchProjectSlug(projectId),
+  ]);
   console.log(`  ${issues.length} issue(s) found in Crowdin.`);
 
   for (const issue of issues) {
@@ -510,9 +557,9 @@ async function syncProject(projectId, existingMap) {
     const ghIssue = existingMap.get(key);
 
     if (ghIssue) {
-      await syncExistingIssue(ghIssue, issue, projectId);
+      await syncExistingIssue(ghIssue, issue, projectId, projectSlug);
     } else {
-      await createNewIssue(issue, projectId, existingMap, key);
+      await createNewIssue(issue, projectId, projectSlug, existingMap, key);
     }
 
     // Brief pause to stay well within GitHub's secondary rate limits.
@@ -555,6 +602,8 @@ export {
   buildIssueBody,
   buildIssueLabels,
   fetchCrowdinIssues,
+  fetchProjectSlug,
+  projectSlugCache,
   ensureLabel,
   ensureCrowdinLabel,
   ensureIssueLabels,

@@ -25,6 +25,9 @@ jest.mock('@crowdin/crowdin-api-client', () => ({
         listStringComments: jest.fn().mockResolvedValue({ data: [] }),
       }),
     },
+    projectsGroupsApi: {
+      getProject: jest.fn().mockResolvedValue({ data: { identifier: 'fake-project-slug' } }),
+    },
   })),
 }));
 
@@ -91,6 +94,8 @@ import {
   getGithubAssignees,
   getTypeLabel,
   getLanguageLabels,
+  fetchProjectSlug,
+  projectSlugCache,
 } from '../src/sync-crowdin-issues.js';
 
 // Extract mock fn references from the singleton instances created at module
@@ -106,6 +111,8 @@ const _crowdinInst = CrowdinClient.mock.results[0].value;
 const mockListStringCommentsStable = jest.fn().mockResolvedValue({ data: [] });
 const mockWithFetchAll = _crowdinInst.stringCommentsApi.withFetchAll;
 mockWithFetchAll.mockReturnValue({ listStringComments: mockListStringCommentsStable });
+
+const mockGetProject = _crowdinInst.projectsGroupsApi.getProject;
 
 // Octokit mocks
 const mockCreateLabel = _octokitInst.rest.issues.createLabel;
@@ -545,8 +552,43 @@ describe('buildIssueBody', () => {
     expect(buildIssueBody({ ...baseIssue, string: undefined }, projectId)).toContain('_(unavailable)_');
   });
 
-  it('includes a link to the Crowdin project', () => {
-    expect(buildIssueBody(baseIssue, projectId)).toContain(`https://crowdin.com/project/${projectId}`);
+  it('omits the View on Crowdin link when no slug is given', () => {
+    expect(buildIssueBody(baseIssue, projectId)).not.toContain('View on Crowdin');
+  });
+
+  it('links to the project page using the slug when slug is given but string.id is absent', () => {
+    const issue = { ...baseIssue, string: undefined };
+    const body = buildIssueBody(issue, projectId, 'my-project');
+    expect(body).toContain('https://crowdin.com/project/my-project');
+  });
+
+  it('links directly to the string in the editor when slug and string.id are present', () => {
+    const issue = { ...baseIssue, languageId: 'fr', string: { text: 'Source', id: 999 } };
+    const body = buildIssueBody(issue, projectId, 'my-project');
+    expect(body).toContain('https://crowdin.com/editor/my-project/fr#999');
+  });
+
+  it('includes the File row when string.file.path is present', () => {
+    const issue = { ...baseIssue, string: { text: 'Source', file: { path: '/src/strings.json' } } };
+    expect(buildIssueBody(issue, projectId)).toContain('| **File** | `/src/strings.json` |');
+  });
+
+  it('includes the File row from string.filePath when string.file.path is absent', () => {
+    const issue = { ...baseIssue, string: { text: 'Source', filePath: '/fallback/path.json' } };
+    expect(buildIssueBody(issue, projectId)).toContain('| **File** | `/fallback/path.json` |');
+  });
+
+  it('includes the String ID row when string.identifier is present', () => {
+    const issue = { ...baseIssue, string: { text: 'Source', identifier: 'menu.title' } };
+    expect(buildIssueBody(issue, projectId)).toContain('| **String ID** | `menu.title` |');
+  });
+
+  it('omits the File row when file info is absent', () => {
+    expect(buildIssueBody(baseIssue, projectId)).not.toContain('**File**');
+  });
+
+  it('omits the String ID row when identifier is absent', () => {
+    expect(buildIssueBody(baseIssue, projectId)).not.toContain('**String ID**');
   });
 
   it('renders the issue description', () => {
@@ -610,6 +652,40 @@ describe('buildIssueBody', () => {
     const body = buildIssueBody({ ...baseIssue, languageId: 'xx' }, projectId);
     const lines = body.split('\n');
     expect(MARKER_RE.test(lines[lines.length - 1])).toBe(true);
+  });
+});
+
+// fetchProjectSlug
+
+describe('fetchProjectSlug', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    projectSlugCache.clear();
+  });
+
+  it('calls getProject with the project ID and returns the identifier', async () => {
+    mockGetProject.mockResolvedValue({ data: { identifier: 'my-project' } });
+    const slug = await fetchProjectSlug('123');
+    expect(slug).toBe('my-project');
+    expect(mockGetProject).toHaveBeenCalledWith('123');
+  });
+
+  it('caches the result and only calls getProject once per project', async () => {
+    mockGetProject.mockResolvedValue({ data: { identifier: 'cached-project' } });
+    await fetchProjectSlug('42');
+    await fetchProjectSlug('42');
+    expect(mockGetProject).toHaveBeenCalledTimes(1);
+  });
+
+  it('fetches independently for different project IDs', async () => {
+    mockGetProject
+      .mockResolvedValueOnce({ data: { identifier: 'project-a' } })
+      .mockResolvedValueOnce({ data: { identifier: 'project-b' } });
+    const a = await fetchProjectSlug('1');
+    const b = await fetchProjectSlug('2');
+    expect(a).toBe('project-a');
+    expect(b).toBe('project-b');
+    expect(mockGetProject).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -735,16 +811,19 @@ describe('addGithubAssignees', () => {
 describe('syncExistingIssue', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    projectSlugCache.clear();
     jest.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => jest.restoreAllMocks());
 
+  const SLUG = 'fake-slug';
+
   /** Build a GH issue that is fully in sync with the given Crowdin issue. */
   function makeInSyncGhIssue(crowdinIssue, projectId, overrides = {}) {
     return makeGhIssue({
       title: buildIssueTitle(crowdinIssue),
-      body: buildIssueBody(crowdinIssue, projectId),
+      body: buildIssueBody(crowdinIssue, projectId, SLUG),
       labels: buildIssueLabels(crowdinIssue).map((name) => ({ name })),
       ...overrides,
     });
@@ -755,7 +834,7 @@ describe('syncExistingIssue', () => {
     const ghIssue = makeInSyncGhIssue(issue, '42', { state: 'open' });
     mockUpdate.mockResolvedValue({ data: {} });
 
-    await syncExistingIssue(ghIssue, issue, '42');
+    await syncExistingIssue(ghIssue, issue, '42', SLUG);
 
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
       state: 'closed',
@@ -769,7 +848,7 @@ describe('syncExistingIssue', () => {
     const ghIssue = makeInSyncGhIssue(issue, '42', { state: 'closed' });
     mockUpdate.mockResolvedValue({ data: {} });
 
-    await syncExistingIssue(ghIssue, issue, '42');
+    await syncExistingIssue(ghIssue, issue, '42', SLUG);
 
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ state: 'open' }));
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Reopened'));
@@ -780,10 +859,10 @@ describe('syncExistingIssue', () => {
     const ghIssue = makeInSyncGhIssue(issue, '42', { body: 'stale body' });
     mockUpdate.mockResolvedValue({ data: {} });
 
-    await syncExistingIssue(ghIssue, issue, '42');
+    await syncExistingIssue(ghIssue, issue, '42', SLUG);
 
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      body: buildIssueBody(issue, '42'),
+      body: buildIssueBody(issue, '42', SLUG),
     }));
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Updated'));
   });
@@ -793,7 +872,7 @@ describe('syncExistingIssue', () => {
     const ghIssue = makeInSyncGhIssue(issue, '42', { title: 'Old title' });
     mockUpdate.mockResolvedValue({ data: {} });
 
-    await syncExistingIssue(ghIssue, issue, '42');
+    await syncExistingIssue(ghIssue, issue, '42', SLUG);
 
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
       title: buildIssueTitle(issue),
@@ -806,7 +885,7 @@ describe('syncExistingIssue', () => {
     const ghIssue = makeInSyncGhIssue(issue, '42', { labels: [{ name: 'crowdin' }] });
     mockUpdate.mockResolvedValue({ data: {} });
 
-    await syncExistingIssue(ghIssue, issue, '42');
+    await syncExistingIssue(ghIssue, issue, '42', SLUG);
 
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
       labels: buildIssueLabels(issue),
@@ -819,12 +898,12 @@ describe('syncExistingIssue', () => {
     const ghIssue = makeGhIssue({ number: 13, state: 'open', title: 'Old', body: 'stale', labels: [] });
     mockUpdate.mockResolvedValue({ data: {} });
 
-    await syncExistingIssue(ghIssue, issue, '42');
+    await syncExistingIssue(ghIssue, issue, '42', SLUG);
 
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
       state: 'closed',
       title: buildIssueTitle(issue),
-      body: buildIssueBody(issue, '42'),
+      body: buildIssueBody(issue, '42', SLUG),
       labels: buildIssueLabels(issue),
     }));
   });
@@ -834,12 +913,12 @@ describe('syncExistingIssue', () => {
     const ghIssue = makeGhIssue({ number: 14, state: 'closed', title: 'Old', body: 'stale', labels: [] });
     mockUpdate.mockResolvedValue({ data: {} });
 
-    await syncExistingIssue(ghIssue, issue, '42');
+    await syncExistingIssue(ghIssue, issue, '42', SLUG);
 
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
       state: 'open',
       title: buildIssueTitle(issue),
-      body: buildIssueBody(issue, '42'),
+      body: buildIssueBody(issue, '42', SLUG),
     }));
   });
 
@@ -847,7 +926,7 @@ describe('syncExistingIssue', () => {
     const issue = makeCrowdinIssue({ id: 8, issueStatus: 'unresolved' });
     const ghIssue = makeInSyncGhIssue(issue, '42', { state: 'open' });
 
-    await syncExistingIssue(ghIssue, issue, '42');
+    await syncExistingIssue(ghIssue, issue, '42', SLUG);
 
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('In sync'));
@@ -857,7 +936,7 @@ describe('syncExistingIssue', () => {
     const issue = makeCrowdinIssue({ id: 9, issueStatus: 'resolved' });
     const ghIssue = makeInSyncGhIssue(issue, '42', { state: 'closed' });
 
-    await syncExistingIssue(ghIssue, issue, '42');
+    await syncExistingIssue(ghIssue, issue, '42', SLUG);
 
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('In sync'));
@@ -865,13 +944,12 @@ describe('syncExistingIssue', () => {
 
   it('recognises labels supplied as plain strings (not objects)', async () => {
     const issue = makeCrowdinIssue({ id: 11, issueStatus: 'unresolved' });
-    // Simulate GH returning labels as raw strings rather than {name} objects.
     const ghIssue = makeInSyncGhIssue(issue, '42', {
       state: 'open',
       labels: buildIssueLabels(issue), // plain strings
     });
 
-    await syncExistingIssue(ghIssue, issue, '42');
+    await syncExistingIssue(ghIssue, issue, '42', SLUG);
 
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('In sync'));
@@ -881,7 +959,7 @@ describe('syncExistingIssue', () => {
     const issue = makeCrowdinIssue({ id: 10, issueStatus: 'resolved' });
     const ghIssue = makeGhIssue({ number: 17, state: 'closed', body: 'stale body' });
 
-    await syncExistingIssue(ghIssue, issue, '42');
+    await syncExistingIssue(ghIssue, issue, '42', SLUG);
 
     expect(mockUpdate).not.toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('In sync'));
@@ -893,17 +971,20 @@ describe('syncExistingIssue', () => {
 describe('createNewIssue', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    projectSlugCache.clear();
     jest.spyOn(console, 'log').mockImplementation(() => {});
   });
 
   afterEach(() => jest.restoreAllMocks());
+
+  const SLUG = 'fake-slug';
 
   it('creates a GH issue with correct labels and adds it to the map', async () => {
     const issue = makeCrowdinIssue({ id: 1, issueStatus: 'unresolved' });
     mockCreate.mockResolvedValue({ data: { number: 50, state: 'open' } });
 
     const map = new Map();
-    await createNewIssue(issue, '42', map, '42:1');
+    await createNewIssue(issue, '42', SLUG, map, '42:1');
 
     expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
       labels: buildIssueLabels(issue),
@@ -916,7 +997,7 @@ describe('createNewIssue', () => {
     const issue = makeCrowdinIssue({ id: 2, issueStatus: 'unresolved', languageId: 'xx' });
     mockCreate.mockResolvedValue({ data: { number: 51, state: 'open' } });
 
-    await createNewIssue(issue, '42', new Map(), '42:2');
+    await createNewIssue(issue, '42', SLUG, new Map(), '42:2');
 
     expect(mockAddAssignees).toHaveBeenCalledWith(expect.objectContaining({
       issue_number: 51,
@@ -929,7 +1010,7 @@ describe('createNewIssue', () => {
     const issue = makeCrowdinIssue({ id: 3, issueStatus: 'unresolved', languageId: 'ngh' });
     mockCreate.mockResolvedValue({ data: { number: 52, state: 'open' } });
 
-    await createNewIssue(issue, '42', new Map(), '42:3');
+    await createNewIssue(issue, '42', SLUG, new Map(), '42:3');
 
     expect(mockAddAssignees).not.toHaveBeenCalled();
   });
@@ -939,7 +1020,7 @@ describe('createNewIssue', () => {
     mockCreate.mockResolvedValue({ data: { number: 53, state: 'open' } });
     mockUpdate.mockResolvedValue({ data: { number: 53, state: 'closed' } });
 
-    await createNewIssue(issue, '42', new Map(), '42:4');
+    await createNewIssue(issue, '42', SLUG, new Map(), '42:4');
 
     expect(mockCreate).toHaveBeenCalledTimes(1);
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
@@ -954,7 +1035,7 @@ describe('createNewIssue', () => {
     const issue = makeCrowdinIssue({ id: 5, issueStatus: 'unresolved' });
     mockCreate.mockResolvedValue({ data: { number: 54, state: 'open' } });
 
-    await createNewIssue(issue, '42', new Map(), '42:5');
+    await createNewIssue(issue, '42', SLUG, new Map(), '42:5');
 
     expect(mockUpdate).not.toHaveBeenCalled();
   });
@@ -965,6 +1046,7 @@ describe('createNewIssue', () => {
 describe('syncProject', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    projectSlugCache.clear();
     jest.useFakeTimers();
     jest.spyOn(console, 'log').mockImplementation(() => {});
   });
@@ -1047,6 +1129,7 @@ describe('updateGithubIssue', () => {
 describe('main', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    projectSlugCache.clear();
     jest.useFakeTimers();
     jest.spyOn(console, 'log').mockImplementation(() => {});
   });
