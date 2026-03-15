@@ -392,11 +392,14 @@ function buildIssueBody(crowdinIssue, projectId, projectSlug) {
 
   // Build the deep-link URL. If we have the slug, link straight to the string
   // in the Crowdin editor for that language; otherwise fall back to the project page.
-  // The numeric project ID is never used in URLs as it does not resolve on crowdin.com.
+  // URL format: /editor/{slug}/{fileId}/en-{normalizedLang}?view=comfortable#{stringId}
+  // The language segment strips hyphens and lowercases (e.g. "zh-CN" → "en-zhcn").
   const stringId = crowdinIssue.string?.id;
+  const fileId = crowdinIssue.string?.file?.id;
   let crowdinUrl;
-  if (projectSlug && crowdinIssue.languageId && stringId) {
-    crowdinUrl = `https://crowdin.com/editor/${projectSlug}/${crowdinIssue.languageId}#${stringId}`;
+  if (projectSlug && crowdinIssue.languageId && fileId && stringId) {
+    const normalizedLang = crowdinIssue.languageId.replaceAll(/[-_]/g, '').toLowerCase();
+    crowdinUrl = `https://crowdin.com/editor/${projectSlug}/${fileId}/en-${normalizedLang}?view=comfortable#${stringId}`;
   } else if (projectSlug) {
     crowdinUrl = `https://crowdin.com/project/${projectSlug}`;
   } else {
