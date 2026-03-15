@@ -1,0 +1,140 @@
+{
+  "$schema": "./schemas/language-managers.schema.json",
+  "bg": [
+    {
+      "crowdin": "lyubomirv",
+      "discord": "lyubomirv",
+      "github": "lyubomirv"
+    }
+  ],
+  "cs": [
+    {
+      "crowdin": "helak",
+      "discord": "helak",
+      "github": null
+    }
+  ],
+  "de": [
+    {
+      "crowdin": "yungleballz",
+      "discord": "yungleballz",
+      "github": "yungleballz"
+    }
+  ],
+  "es": [
+    {
+      "crowdin": "tatibugatti",
+      "discord": "tatibugatti",
+      "github": "tatacontreras"
+    }
+  ],
+  "fr": [
+    {
+      "crowdin": "moi952",
+      "discord": "moi952",
+      "github": "moi952"
+    },
+    {
+      "crowdin": "chainejoueur542",
+      "discord": "chainejoueur542",
+      "github": "jorys-paulin"
+    },
+    {
+      "crowdin": "zdimension",
+      "discord": "zdimension",
+      "github": "zdimension"
+    }
+  ],
+  "hu": [
+    {
+      "crowdin": "Therealmate",
+      "discord": "mate8090",
+      "github": "therealmate"
+    }
+  ],
+  "it": [
+    {
+      "crowdin": "elix",
+      "discord": "elix",
+      "github": "TheElixZammuto"
+    }
+  ],
+  "ja": [
+    {
+      "crowdin": "magicalkayo",
+      "discord": "magicalkayo",
+      "github": null
+    }
+  ],
+  "ko": [
+    {
+      "crowdin": "key994984",
+      "discord": "alter_gate",
+      "github": null
+    }
+  ],
+  "pl": [
+    {
+      "crowdin": "alekshere",
+      "discord": "alekshere",
+      "github": null
+    }
+  ],
+  "pt": [
+    {
+      "crowdin": "vithorio",
+      "discord": "synthdroid",
+      "github": "Hazer"
+    }
+  ],
+  "pt-BR": [
+    {
+      "crowdin": "vithorio",
+      "discord": "synthdroid",
+      "github": "Hazer"
+    }
+  ],
+  "ru": [],
+  "sv": [
+    {
+      "crowdin": "zjoasan",
+      "discord": "zjoasan",
+      "github": "zjoasan"
+    }
+  ],
+  "tr": [
+    {
+      "crowdin": "ogulcanbayram",
+      "discord": "bayramog92",
+      "github": null
+    }
+  ],
+  "uk": [
+    {
+      "crowdin": "rabbitruthless",
+      "discord": "hungry_rabbit",
+      "github": null
+    }
+  ],
+  "vi": [
+    {
+      "crowdin": "daongochuy",
+      "discord": "daongochuy2516",
+      "github": "daongochuy2516"
+    }
+  ],
+  "zh-CN": [
+    {
+      "crowdin": "x1ao4",
+      "discord": "x1ao4",
+      "github": "x1ao4"
+    }
+  ],
+  "zh-TW": [
+    {
+      "crowdin": "beststeve",
+      "discord": "beststeve",
+      "github": null
+    }
+  ]
+}
