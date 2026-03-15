@@ -557,10 +557,23 @@ describe('buildIssueBody', () => {
     expect(body).toContain('https://crowdin.com/project/my-project');
   });
 
-  it('links directly to the string in the editor when slug and string.id are present', () => {
+  it('links directly to the string in the editor when slug, file.id and string.id are present', () => {
+    const issue = { ...baseIssue, languageId: 'fr', string: { text: 'Source', id: 999, file: { id: 5842 } } };
+    const body = buildIssueBody(issue, projectId, 'my-project');
+    expect(body).toContain('https://crowdin.com/editor/my-project/5842/en-fr?view=comfortable#999');
+  });
+
+  it('links directly to the editor with a compound language code normalized (zh-CN → en-zhcn)', () => {
+    const issue = { ...baseIssue, languageId: 'zh-CN', string: { text: 'Source', id: 91860, file: { id: 5842 } } };
+    const body = buildIssueBody(issue, projectId, 'my-project');
+    expect(body).toContain('https://crowdin.com/editor/my-project/5842/en-zhcn?view=comfortable#91860');
+  });
+
+  it('falls back to project page when file.id is absent', () => {
     const issue = { ...baseIssue, languageId: 'fr', string: { text: 'Source', id: 999 } };
     const body = buildIssueBody(issue, projectId, 'my-project');
-    expect(body).toContain('https://crowdin.com/editor/my-project/fr#999');
+    expect(body).toContain('https://crowdin.com/project/my-project');
+    expect(body).not.toContain('/editor/');
   });
 
   it('includes the File row when string.file.path is present', () => {
