@@ -69,8 +69,11 @@ import { Octokit } from '@octokit/rest';
 import {
   buildIssueTitle,
   buildIssueBody,
+  buildIssueLabels,
   fetchCrowdinIssues,
+  ensureLabel,
   ensureCrowdinLabel,
+  ensureIssueLabels,
   loadExistingGithubIssues,
   createGithubIssue,
   addGithubAssignees,
@@ -82,8 +85,12 @@ import {
   TYPE_MAP,
   MARKER_RE,
   CROWDIN_LABEL,
+  LANG_LABEL_COLOR,
+  TYPE_LABEL_COLOR,
   getLanguageManagers,
   getGithubAssignees,
+  getTypeLabel,
+  getLanguageLabels,
 } from '../src/sync-crowdin-issues.js';
 
 // Extract mock fn references from the singleton instances created at module
@@ -175,38 +182,230 @@ describe('MARKER_RE', () => {
 // buildIssueTitle
 
 describe('buildIssueTitle', () => {
-  it('returns a title with known issue type and language', () => {
-    const issue = { issueType: 'source_mistake', languageId: 'fr', text: 'The source text is wrong' };
-    expect(buildIssueTitle(issue)).toBe('[Crowdin] [FR] Source Mistake: The source text is wrong');
+  it('returns just the issue text (truncated to 72 chars)', () => {
+    const issue = { text: 'Could it be better to use double quotes?' };
+    expect(buildIssueTitle(issue)).toBe('Could it be better to use double quotes?');
   });
 
-  it('returns a title without language when languageId is absent', () => {
-    const issue = { issueType: 'general_question', languageId: null, text: 'What does this mean?' };
-    expect(buildIssueTitle(issue)).toBe('[Crowdin] General Question: What does this mean?');
+  it('truncates long text to 72 characters', () => {
+    const issue = { text: 'a'.repeat(100) };
+    expect(buildIssueTitle(issue).length).toBe(72);
   });
 
-  it('falls back to raw issueType when not in TYPE_MAP', () => {
-    const issue = { issueType: 'unknown_type', languageId: 'de', text: 'Some text' };
-    expect(buildIssueTitle(issue)).toContain('unknown_type');
-  });
-
-  it('truncates long descriptions to 72 characters', () => {
-    const issue = { issueType: 'context_request', languageId: null, text: 'a'.repeat(100) };
-    const title = buildIssueTitle(issue);
-    const snippet = title.slice('[Crowdin] Context Request: '.length);
-    expect(snippet.length).toBe(72);
-  });
-
-  it('collapses newlines in the description snippet', () => {
-    const issue = { issueType: 'translation_mistake', languageId: null, text: 'line one\nline two\r\nline three' };
+  it('collapses newlines to spaces', () => {
+    const issue = { text: 'line one\nline two\r\nline three' };
     const title = buildIssueTitle(issue);
     expect(title).not.toMatch(/[\r\n]/);
     expect(title).toContain('line one line two line three');
   });
 
-  it('handles missing text gracefully', () => {
-    const issue = { issueType: 'source_mistake', languageId: null, text: undefined };
-    expect(buildIssueTitle(issue)).toBe('[Crowdin] Source Mistake: ');
+  it('returns an empty string when text is absent', () => {
+    expect(buildIssueTitle({ text: undefined })).toBe('');
+  });
+});
+
+// getTypeLabel
+
+describe('getTypeLabel', () => {
+  it('returns type:general-question for general_question', () => {
+    expect(getTypeLabel('general_question')).toBe('type:general-question');
+  });
+
+  it('returns type:source-mistake for source_mistake', () => {
+    expect(getTypeLabel('source_mistake')).toBe('type:source-mistake');
+  });
+
+  it('returns type:translation-mistake for translation_mistake', () => {
+    expect(getTypeLabel('translation_mistake')).toBe('type:translation-mistake');
+  });
+
+  it('returns type:context-request for context_request', () => {
+    expect(getTypeLabel('context_request')).toBe('type:context-request');
+  });
+
+  it('lowercases the type', () => {
+    expect(getTypeLabel('SOME_TYPE')).toBe('type:some-type');
+  });
+});
+
+// getLanguageLabels
+
+describe('getLanguageLabels', () => {
+  it('returns a single label for a simple language code', () => {
+    expect(getLanguageLabels('fr')).toEqual(['lang:fr']);
+  });
+
+  it('returns two labels for a compound language code (hyphen)', () => {
+    expect(getLanguageLabels('pt-BR')).toEqual(['lang:pt', 'lang:pt-BR']);
+  });
+
+  it('normalises underscore to hyphen and returns two labels', () => {
+    expect(getLanguageLabels('pt_BR')).toEqual(['lang:pt', 'lang:pt-BR']);
+  });
+
+  it('returns an empty array when languageId is null', () => {
+    expect(getLanguageLabels(null)).toEqual([]);
+  });
+
+  it('returns an empty array when languageId is undefined', () => {
+    expect(getLanguageLabels(undefined)).toEqual([]);
+  });
+});
+
+// buildIssueLabels
+
+describe('buildIssueLabels', () => {
+  it('includes the crowdin base label, type label, and language label', () => {
+    const issue = { issueType: 'general_question', languageId: 'fr' };
+    expect(buildIssueLabels(issue)).toEqual(['crowdin', 'type:general-question', 'lang:fr']);
+  });
+
+  it('includes both base and compound language labels for pt-BR', () => {
+    const issue = { issueType: 'source_mistake', languageId: 'pt-BR' };
+    expect(buildIssueLabels(issue)).toEqual([
+      'crowdin',
+      'type:source-mistake',
+      'lang:pt',
+      'lang:pt-BR',
+    ]);
+  });
+
+  it('omits language labels when languageId is absent', () => {
+    const issue = { issueType: 'context_request', languageId: null };
+    expect(buildIssueLabels(issue)).toEqual(['crowdin', 'type:context-request']);
+  });
+});
+
+// ensureLabel
+
+describe('ensureLabel', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('calls createLabel with the correct args and logs on success', async () => {
+    mockCreateLabel.mockResolvedValue({});
+    await ensureLabel('lang:fr', LANG_LABEL_COLOR, 'Language: fr');
+    expect(mockCreateLabel).toHaveBeenCalledWith(expect.objectContaining({
+      name: 'lang:fr',
+      color: LANG_LABEL_COLOR,
+      description: 'Language: fr',
+    }));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('lang:fr'));
+  });
+
+  it('silently ignores 422 (label already exists)', async () => {
+    const err = new Error('Unprocessable Entity');
+    err.status = 422;
+    mockCreateLabel.mockRejectedValue(err);
+    await expect(ensureLabel('lang:fr', LANG_LABEL_COLOR, '')).resolves.toBeUndefined();
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('logs a warning for non-422 errors', async () => {
+    const err = new Error('Server error');
+    err.status = 500;
+    mockCreateLabel.mockRejectedValue(err);
+    await ensureLabel('lang:fr', LANG_LABEL_COLOR, '');
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('lang:fr'));
+  });
+});
+
+// ensureCrowdinLabel
+
+describe('ensureCrowdinLabel', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('creates the crowdin label with the correct name', async () => {
+    mockCreateLabel.mockResolvedValue({});
+    await ensureCrowdinLabel();
+    expect(mockCreateLabel).toHaveBeenCalledWith(expect.objectContaining({
+      name: CROWDIN_LABEL,
+    }));
+  });
+
+  it('silently ignores 422 (label already exists)', async () => {
+    const err = new Error('Unprocessable Entity');
+    err.status = 422;
+    mockCreateLabel.mockRejectedValue(err);
+    await expect(ensureCrowdinLabel()).resolves.toBeUndefined();
+    expect(console.warn).not.toHaveBeenCalled();
+  });
+
+  it('logs a warning for non-422 errors', async () => {
+    const err = new Error('Server error');
+    err.status = 500;
+    mockCreateLabel.mockRejectedValue(err);
+    await ensureCrowdinLabel();
+    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Could not create label'));
+  });
+});
+
+// ensureIssueLabels
+
+describe('ensureIssueLabels', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    jest.spyOn(console, 'log').mockImplementation(() => {});
+    jest.spyOn(console, 'warn').mockImplementation(() => {});
+  });
+
+  afterEach(() => jest.restoreAllMocks());
+
+  it('creates the type label and one language label for a simple language', async () => {
+    mockCreateLabel.mockResolvedValue({});
+    await ensureIssueLabels({ issueType: 'source_mistake', languageId: 'fr' });
+    const names = mockCreateLabel.mock.calls.map((c) => c[0].name);
+    expect(names).toContain('type:source-mistake');
+    expect(names).toContain('lang:fr');
+  });
+
+  it('creates two language labels for a compound language (pt-BR)', async () => {
+    mockCreateLabel.mockResolvedValue({});
+    await ensureIssueLabels({ issueType: 'general_question', languageId: 'pt-BR' });
+    const names = mockCreateLabel.mock.calls.map((c) => c[0].name);
+    expect(names).toContain('lang:pt');
+    expect(names).toContain('lang:pt-BR');
+  });
+
+  it('uses TYPE_LABEL_COLOR for the type label', async () => {
+    mockCreateLabel.mockResolvedValue({});
+    await ensureIssueLabels({ issueType: 'source_mistake', languageId: 'fr' });
+    const typeCall = mockCreateLabel.mock.calls.find((c) => c[0].name === 'type:source-mistake');
+    expect(typeCall[0].color).toBe(TYPE_LABEL_COLOR);
+  });
+
+  it('uses LANG_LABEL_COLOR for language labels', async () => {
+    mockCreateLabel.mockResolvedValue({});
+    await ensureIssueLabels({ issueType: 'source_mistake', languageId: 'fr' });
+    const langCall = mockCreateLabel.mock.calls.find((c) => c[0].name === 'lang:fr');
+    expect(langCall[0].color).toBe(LANG_LABEL_COLOR);
+  });
+
+  it('skips language label creation when languageId is absent', async () => {
+    mockCreateLabel.mockResolvedValue({});
+    await ensureIssueLabels({ issueType: 'general_question', languageId: null });
+    const names = mockCreateLabel.mock.calls.map((c) => c[0].name);
+    expect(names.every((n) => !n.startsWith('lang:'))).toBe(true);
+  });
+
+  it('uses the raw issueType as description when not in TYPE_MAP', async () => {
+    mockCreateLabel.mockResolvedValue({});
+    await ensureIssueLabels({ issueType: 'unknown_type', languageId: null });
+    const typeCall = mockCreateLabel.mock.calls.find((c) => c[0].name === 'type:unknown-type');
+    expect(typeCall[0].description).toBe('unknown_type');
   });
 });
 
@@ -446,44 +645,30 @@ describe('fetchCrowdinIssues', () => {
   });
 });
 
-// ensureCrowdinLabel
+// createGithubIssue
 
-describe('ensureCrowdinLabel', () => {
-  beforeEach(() => {
-    jest.clearAllMocks();
-    jest.spyOn(console, 'log').mockImplementation(() => {});
-    jest.spyOn(console, 'warn').mockImplementation(() => {});
+describe('createGithubIssue', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('returns the created issue data', async () => {
+    mockCreate.mockResolvedValue({ data: { number: 99, state: 'open' } });
+    const labels = ['crowdin', 'type:source-mistake', 'lang:fr'];
+    const result = await createGithubIssue('Test Title', 'Test Body', labels);
+    expect(result.number).toBe(99);
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
+      title: 'Test Title',
+      body: 'Test Body',
+      labels,
+    }));
   });
 
-  afterEach(() => {
-    jest.restoreAllMocks();
-  });
-
-  it('logs success when label is created', async () => {
-    mockCreateLabel.mockResolvedValue({});
-    await ensureCrowdinLabel();
-    expect(mockCreateLabel).toHaveBeenCalled();
-    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Created label'));
-  });
-
-  it('silently ignores 422 (label already exists)', async () => {
-    const err = new Error('Unprocessable Entity');
-    err.status = 422;
-    mockCreateLabel.mockRejectedValue(err);
-    await expect(ensureCrowdinLabel()).resolves.toBeUndefined();
-    expect(console.warn).not.toHaveBeenCalled();
-  });
-
-  it('logs a warning for non-422 errors', async () => {
-    const err = new Error('Server error');
-    err.status = 500;
-    mockCreateLabel.mockRejectedValue(err);
-    await ensureCrowdinLabel();
-    expect(console.warn).toHaveBeenCalledWith(expect.stringContaining('Could not create label'));
+  it('does not pass assignees in the create call', async () => {
+    mockCreate.mockResolvedValue({ data: { number: 99, state: 'open' } });
+    await createGithubIssue('Title', 'Body', [CROWDIN_LABEL]);
+    const call = mockCreate.mock.calls[0][0];
+    expect(call).not.toHaveProperty('assignees');
   });
 });
-
-// loadExistingGithubIssues
 
 describe('loadExistingGithubIssues', () => {
   beforeEach(() => jest.clearAllMocks());
@@ -526,30 +711,6 @@ describe('loadExistingGithubIssues', () => {
   });
 });
 
-// createGithubIssue
-
-describe('createGithubIssue', () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  it('returns the created issue data', async () => {
-    mockCreate.mockResolvedValue({ data: { number: 99, state: 'open' } });
-    const result = await createGithubIssue('Test Title', 'Test Body');
-    expect(result.number).toBe(99);
-    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
-      title: 'Test Title',
-      body: 'Test Body',
-      labels: [CROWDIN_LABEL],
-    }));
-  });
-
-  it('does not pass assignees in the create call', async () => {
-    mockCreate.mockResolvedValue({ data: { number: 99, state: 'open' } });
-    await createGithubIssue('Title', 'Body');
-    const call = mockCreate.mock.calls[0][0];
-    expect(call).not.toHaveProperty('assignees');
-  });
-});
-
 // addGithubAssignees
 
 describe('addGithubAssignees', () => {
@@ -579,9 +740,19 @@ describe('syncExistingIssue', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
+  /** Build a GH issue that is fully in sync with the given Crowdin issue. */
+  function makeInSyncGhIssue(crowdinIssue, projectId, overrides = {}) {
+    return makeGhIssue({
+      title: buildIssueTitle(crowdinIssue),
+      body: buildIssueBody(crowdinIssue, projectId),
+      labels: buildIssueLabels(crowdinIssue).map((name) => ({ name })),
+      ...overrides,
+    });
+  }
+
   it('closes an open GH issue when Crowdin issue is resolved', async () => {
     const issue = makeCrowdinIssue({ id: 1, issueStatus: 'resolved' });
-    const ghIssue = makeGhIssue({ number: 10, state: 'open', body: buildIssueBody(issue, '42') });
+    const ghIssue = makeInSyncGhIssue(issue, '42', { state: 'open' });
     mockUpdate.mockResolvedValue({ data: {} });
 
     await syncExistingIssue(ghIssue, issue, '42');
@@ -595,7 +766,7 @@ describe('syncExistingIssue', () => {
 
   it('reopens a closed GH issue when Crowdin issue is re-opened', async () => {
     const issue = makeCrowdinIssue({ id: 2, issueStatus: 'unresolved' });
-    const ghIssue = makeGhIssue({ number: 11, state: 'closed', body: buildIssueBody(issue, '42') });
+    const ghIssue = makeInSyncGhIssue(issue, '42', { state: 'closed' });
     mockUpdate.mockResolvedValue({ data: {} });
 
     await syncExistingIssue(ghIssue, issue, '42');
@@ -604,9 +775,9 @@ describe('syncExistingIssue', () => {
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Reopened'));
   });
 
-  it('updates the body when stale and state already matches (open/unresolved)', async () => {
+  it('updates when body is stale', async () => {
     const issue = makeCrowdinIssue({ id: 3, issueStatus: 'unresolved' });
-    const ghIssue = makeGhIssue({ number: 12, state: 'open', body: 'stale body' });
+    const ghIssue = makeInSyncGhIssue(issue, '42', { body: 'stale body' });
     mockUpdate.mockResolvedValue({ data: {} });
 
     await syncExistingIssue(ghIssue, issue, '42');
@@ -617,35 +788,64 @@ describe('syncExistingIssue', () => {
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Updated'));
   });
 
-  it('includes updated body in the close call when body is stale', async () => {
-    const issue = makeCrowdinIssue({ id: 4, issueStatus: 'resolved' });
-    const ghIssue = makeGhIssue({ number: 13, state: 'open', body: 'stale body' });
+  it('updates when title is stale', async () => {
+    const issue = makeCrowdinIssue({ id: 4, issueStatus: 'unresolved' });
+    const ghIssue = makeInSyncGhIssue(issue, '42', { title: 'Old title' });
+    mockUpdate.mockResolvedValue({ data: {} });
+
+    await syncExistingIssue(ghIssue, issue, '42');
+
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      title: buildIssueTitle(issue),
+    }));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Updated'));
+  });
+
+  it('updates when labels are stale', async () => {
+    const issue = makeCrowdinIssue({ id: 5, issueStatus: 'unresolved' });
+    const ghIssue = makeInSyncGhIssue(issue, '42', { labels: [{ name: 'crowdin' }] });
+    mockUpdate.mockResolvedValue({ data: {} });
+
+    await syncExistingIssue(ghIssue, issue, '42');
+
+    expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      labels: buildIssueLabels(issue),
+    }));
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Updated'));
+  });
+
+  it('includes stale title+body+labels in the close call', async () => {
+    const issue = makeCrowdinIssue({ id: 6, issueStatus: 'resolved' });
+    const ghIssue = makeGhIssue({ number: 13, state: 'open', title: 'Old', body: 'stale', labels: [] });
     mockUpdate.mockResolvedValue({ data: {} });
 
     await syncExistingIssue(ghIssue, issue, '42');
 
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
       state: 'closed',
+      title: buildIssueTitle(issue),
       body: buildIssueBody(issue, '42'),
+      labels: buildIssueLabels(issue),
     }));
   });
 
-  it('includes updated body in the reopen call when body is stale', async () => {
-    const issue = makeCrowdinIssue({ id: 5, issueStatus: 'unresolved' });
-    const ghIssue = makeGhIssue({ number: 14, state: 'closed', body: 'stale body' });
+  it('includes stale fields in the reopen call', async () => {
+    const issue = makeCrowdinIssue({ id: 7, issueStatus: 'unresolved' });
+    const ghIssue = makeGhIssue({ number: 14, state: 'closed', title: 'Old', body: 'stale', labels: [] });
     mockUpdate.mockResolvedValue({ data: {} });
 
     await syncExistingIssue(ghIssue, issue, '42');
 
     expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({
       state: 'open',
+      title: buildIssueTitle(issue),
       body: buildIssueBody(issue, '42'),
     }));
   });
 
-  it('logs "in sync" and makes no API call when state and body both match', async () => {
-    const issue = makeCrowdinIssue({ id: 6, issueStatus: 'unresolved' });
-    const ghIssue = makeGhIssue({ number: 15, state: 'open', body: buildIssueBody(issue, '42') });
+  it('logs "in sync" and makes no API call when title, body, and labels all match', async () => {
+    const issue = makeCrowdinIssue({ id: 8, issueStatus: 'unresolved' });
+    const ghIssue = makeInSyncGhIssue(issue, '42', { state: 'open' });
 
     await syncExistingIssue(ghIssue, issue, '42');
 
@@ -653,9 +853,9 @@ describe('syncExistingIssue', () => {
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('In sync'));
   });
 
-  it('logs "in sync" and makes no API call when GH is closed and Crowdin is resolved (body matches)', async () => {
-    const issue = makeCrowdinIssue({ id: 7, issueStatus: 'resolved' });
-    const ghIssue = makeGhIssue({ number: 16, state: 'closed', body: buildIssueBody(issue, '42') });
+  it('logs "in sync" and makes no API call when GH is closed and Crowdin is resolved', async () => {
+    const issue = makeCrowdinIssue({ id: 9, issueStatus: 'resolved' });
+    const ghIssue = makeInSyncGhIssue(issue, '42', { state: 'closed' });
 
     await syncExistingIssue(ghIssue, issue, '42');
 
@@ -663,9 +863,22 @@ describe('syncExistingIssue', () => {
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('In sync'));
   });
 
-  it('logs "in sync" and makes no API call when GH is closed and Crowdin is resolved (stale body skipped)', async () => {
-    // When already closed+resolved, we do not refresh the body — it is intentionally skipped.
-    const issue = makeCrowdinIssue({ id: 8, issueStatus: 'resolved' });
+  it('recognises labels supplied as plain strings (not objects)', async () => {
+    const issue = makeCrowdinIssue({ id: 11, issueStatus: 'unresolved' });
+    // Simulate GH returning labels as raw strings rather than {name} objects.
+    const ghIssue = makeInSyncGhIssue(issue, '42', {
+      state: 'open',
+      labels: buildIssueLabels(issue), // plain strings
+    });
+
+    await syncExistingIssue(ghIssue, issue, '42');
+
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('In sync'));
+  });
+
+  it('skips even stale body when GH is already closed and Crowdin is resolved', async () => {
+    const issue = makeCrowdinIssue({ id: 10, issueStatus: 'resolved' });
     const ghIssue = makeGhIssue({ number: 17, state: 'closed', body: 'stale body' });
 
     await syncExistingIssue(ghIssue, issue, '42');
@@ -685,20 +898,21 @@ describe('createNewIssue', () => {
 
   afterEach(() => jest.restoreAllMocks());
 
-  it('creates a GH issue and adds it to the map', async () => {
+  it('creates a GH issue with correct labels and adds it to the map', async () => {
     const issue = makeCrowdinIssue({ id: 1, issueStatus: 'unresolved' });
     mockCreate.mockResolvedValue({ data: { number: 50, state: 'open' } });
 
     const map = new Map();
     await createNewIssue(issue, '42', map, '42:1');
 
-    expect(mockCreate).toHaveBeenCalled();
+    expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
+      labels: buildIssueLabels(issue),
+    }));
     expect(map.has('42:1')).toBe(true);
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Created'));
   });
 
   it('passes assignees via addAssignees after creation', async () => {
-    // 'xx' has github: 'fake-github'
     const issue = makeCrowdinIssue({ id: 2, issueStatus: 'unresolved', languageId: 'xx' });
     mockCreate.mockResolvedValue({ data: { number: 51, state: 'open' } });
 
@@ -708,12 +922,10 @@ describe('createNewIssue', () => {
       issue_number: 51,
       assignees: ['fake-github'],
     }));
-    // Assignees must NOT appear in the create call
     expect(mockCreate).not.toHaveBeenCalledWith(expect.objectContaining({ assignees: expect.anything() }));
   });
 
   it('does not call addAssignees when no managers have a github username', async () => {
-    // 'ngh' has github: null
     const issue = makeCrowdinIssue({ id: 3, issueStatus: 'unresolved', languageId: 'ngh' });
     mockCreate.mockResolvedValue({ data: { number: 52, state: 'open' } });
 

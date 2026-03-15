@@ -74,6 +74,12 @@ const [GH_OWNER, GH_REPO] = (GITHUB_REPOSITORY ?? '/').split('/');
 /** Label applied to every GitHub issue managed by this script. */
 const CROWDIN_LABEL = 'crowdin';
 
+/** Color used for language labels (lang:xx). */
+const LANG_LABEL_COLOR = 'bfd4f2';
+
+/** Color used for issue-type labels (type:xx). */
+const TYPE_LABEL_COLOR = '0075ca';
+
 /** RegExp that matches the hidden deduplication marker embedded in issue bodies. */
 const MARKER_RE = /<!-- crowdin-issue-id:(\d+):(\d+) -->/;
 
@@ -106,23 +112,34 @@ async function fetchCrowdinIssues(projectId) {
 // GitHub helpers
 
 /**
- * Creates the "crowdin" label in the repository if it doesn't already exist.
+ * Creates a label in the repository if it doesn't already exist.
  * A 422 response means the label already exists and is silently ignored.
+ *
+ * @param {string} name
+ * @param {string} color        Hex color without the leading `#`.
+ * @param {string} description
  */
-async function ensureCrowdinLabel() {
+async function ensureLabel(name, color, description) {
   try {
     await octokit.rest.issues.createLabel({
       owner: GH_OWNER,
       repo: GH_REPO,
-      name: CROWDIN_LABEL,
-      color: '1f883d',
-      description: 'Synced automatically from Crowdin',
+      name,
+      color,
+      description,
     });
-    console.log(`  Created label "${CROWDIN_LABEL}".`);
+    console.log(`  Created label "${name}".`);
   } catch (e) {
     if (e.status === 422) return; // already exists – fine
-    console.warn(`  WARN: Could not create label "${CROWDIN_LABEL}": ${e.message}`);
+    console.warn(`  WARN: Could not create label "${name}": ${e.message}`);
   }
+}
+
+/**
+ * Ensures the base "crowdin" label exists.
+ */
+async function ensureCrowdinLabel() {
+  await ensureLabel(CROWDIN_LABEL, '1f883d', 'Synced automatically from Crowdin');
 }
 
 /**
@@ -155,19 +172,20 @@ async function loadExistingGithubIssues() {
 }
 
 /**
- * Creates a new GitHub issue with the crowdin label.
+ * Creates a new GitHub issue with the given labels.
  *
- * @param {string} title
- * @param {string} body
+ * @param {string}   title
+ * @param {string}   body
+ * @param {string[]} labels  Label names to apply (must already exist).
  * @returns {Promise<object>}  Created issue object.
  */
-async function createGithubIssue(title, body) {
+async function createGithubIssue(title, body, labels) {
   const { data } = await octokit.rest.issues.create({
     owner: GH_OWNER,
     repo: GH_REPO,
     title,
     body,
-    labels: [CROWDIN_LABEL],
+    labels,
   });
   return data;
 }
@@ -246,21 +264,76 @@ function getGithubAssignees(languageId) {
 }
 
 /**
+ * Returns the label name for a Crowdin issue type.
+ * Format: "type:<slug>" where slug replaces underscores/spaces with hyphens.
+ *
+ * @param {string} issueType  Raw Crowdin issue type string.
+ * @returns {string}
+ */
+function getTypeLabel(issueType) {
+  return `type:${issueType.toLowerCase().replaceAll('_', '-')}`;
+}
+
+/**
+ * Returns the language label name(s) for a Crowdin language ID.
+ * A compound language like "pt-BR" produces two labels: ["lang:pt", "lang:pt-BR"].
+ * A simple language like "fr" produces one label: ["lang:fr"].
+ *
+ * @param {string|null|undefined} languageId
+ * @returns {string[]}
+ */
+function getLanguageLabels(languageId) {
+  if (!languageId) return [];
+  const normalised = languageId.replace('_', '-');
+  const parts = normalised.split('-');
+  const labels = [`lang:${parts[0]}`];
+  if (parts.length > 1) labels.push(`lang:${normalised}`);
+  return labels;
+}
+
+/**
+ * Returns the full sorted list of GitHub label names for a Crowdin issue.
+ * Always includes the base "crowdin" label plus type and language labels.
+ *
+ * @param {object} crowdinIssue
+ * @returns {string[]}
+ */
+function buildIssueLabels(crowdinIssue) {
+  return [
+    CROWDIN_LABEL,
+    getTypeLabel(crowdinIssue.issueType),
+    ...getLanguageLabels(crowdinIssue.languageId),
+  ];
+}
+
+/**
+ * Ensures all labels required for a Crowdin issue exist in the repository.
+ *
+ * @param {object} crowdinIssue
+ * @returns {Promise<void>}
+ */
+async function ensureIssueLabels(crowdinIssue) {
+  const typeLabel = getTypeLabel(crowdinIssue.issueType);
+  const typeName = TYPE_MAP[crowdinIssue.issueType] ?? crowdinIssue.issueType;
+  await ensureLabel(typeLabel, TYPE_LABEL_COLOR, typeName);
+
+  for (const langLabel of getLanguageLabels(crowdinIssue.languageId)) {
+    await ensureLabel(langLabel, LANG_LABEL_COLOR, `Language: ${langLabel.slice(5)}`);
+  }
+}
+
+/**
  * Builds the GitHub issue title from a Crowdin issue object.
+ * The title is just the (truncated) issue description — type and language
+ * are expressed as labels instead.
  *
  * @param {object} crowdinIssue
  * @returns {string}
  */
 function buildIssueTitle(crowdinIssue) {
-  const type = TYPE_MAP[crowdinIssue.issueType] ?? crowdinIssue.issueType;
-  const lang = crowdinIssue.languageId
-    ? ` [${crowdinIssue.languageId.toUpperCase()}]`
-    : '';
-  // Truncate description so the title stays concise.
-  const snippet = (crowdinIssue.text ?? '')
+  return (crowdinIssue.text ?? '')
     .replaceAll(/[\r\n]+/g, ' ')
     .slice(0, 72);
-  return `[Crowdin]${lang} ${type}: ${snippet}`;
 }
 
 /**
@@ -357,18 +430,33 @@ async function syncExistingIssue(ghIssue, crowdinIssue, projectId) {
     return;
   }
 
+  const expectedTitle = buildIssueTitle(crowdinIssue);
   const expectedBody = buildIssueBody(crowdinIssue, projectId);
-  const bodyPatch = ghIssue.body === expectedBody ? {} : { body: expectedBody };
+  const expectedLabels = buildIssueLabels(crowdinIssue);
+
+  // Build a patch containing only changed fields.
+  const patch = {};
+  if (ghIssue.title !== expectedTitle) patch.title = expectedTitle;
+  if (ghIssue.body !== expectedBody) patch.body = expectedBody;
+
+  // Compare label sets (order-independent).
+  const currentLabels = (ghIssue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)).sort();
+  const desiredLabels = [...expectedLabels].sort();
+  if (JSON.stringify(currentLabels) !== JSON.stringify(desiredLabels)) {
+    patch.labels = expectedLabels;
+    // Ensure any new labels exist before applying them.
+    await ensureIssueLabels(crowdinIssue);
+  }
 
   if (isResolved && ghOpen) {
-    await updateGithubIssue(ghIssue.number, { state: 'closed', state_reason: 'completed', ...bodyPatch });
+    await updateGithubIssue(ghIssue.number, { state: 'closed', state_reason: 'completed', ...patch });
     console.log(`  ✖  Closed   GH #${ghIssue.number} ← Crowdin #${crowdinIssue.id} resolved`);
   } else if (!isResolved && !ghOpen) {
-    await updateGithubIssue(ghIssue.number, { state: 'open', ...bodyPatch });
+    await updateGithubIssue(ghIssue.number, { state: 'open', ...patch });
     console.log(`  ↺  Reopened GH #${ghIssue.number} ← Crowdin #${crowdinIssue.id} re-opened`);
-  } else if (Object.keys(bodyPatch).length > 0) {
-    await updateGithubIssue(ghIssue.number, bodyPatch);
-    console.log(`  ✎  Updated  GH #${ghIssue.number} ← Crowdin #${crowdinIssue.id} body refreshed`);
+  } else if (Object.keys(patch).length > 0) {
+    await updateGithubIssue(ghIssue.number, patch);
+    console.log(`  ✎  Updated  GH #${ghIssue.number} ← Crowdin #${crowdinIssue.id} refreshed`);
   } else {
     console.log(`  ✔  In sync  GH #${ghIssue.number} ← Crowdin #${crowdinIssue.id}`);
   }
@@ -385,9 +473,11 @@ async function syncExistingIssue(ghIssue, crowdinIssue, projectId) {
  */
 async function createNewIssue(crowdinIssue, projectId, existingMap, key) {
   const assignees = getGithubAssignees(crowdinIssue.languageId);
+  await ensureIssueLabels(crowdinIssue);
   const gh = await createGithubIssue(
     buildIssueTitle(crowdinIssue),
     buildIssueBody(crowdinIssue, projectId),
+    buildIssueLabels(crowdinIssue),
   );
   existingMap.set(key, gh);
   console.log(`  ✚  Created  GH #${gh.number} ← Crowdin #${crowdinIssue.id}`);
@@ -463,8 +553,11 @@ if (_isMain) {
 export {
   buildIssueTitle,
   buildIssueBody,
+  buildIssueLabels,
   fetchCrowdinIssues,
+  ensureLabel,
   ensureCrowdinLabel,
+  ensureIssueLabels,
   loadExistingGithubIssues,
   createGithubIssue,
   addGithubAssignees,
@@ -476,6 +569,10 @@ export {
   TYPE_MAP,
   MARKER_RE,
   CROWDIN_LABEL,
+  LANG_LABEL_COLOR,
+  TYPE_LABEL_COLOR,
   getLanguageManagers,
   getGithubAssignees,
+  getTypeLabel,
+  getLanguageLabels,
 };
