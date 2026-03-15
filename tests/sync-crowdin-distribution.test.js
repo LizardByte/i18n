@@ -37,7 +37,6 @@ describe('constants', () => {
 
 describe('collectBody', () => {
   it('resolves with the concatenated buffer from all data events', async () => {
-    const { EventEmitter } = require('node:events');
     const mockRes = new EventEmitter();
 
     const promise = collectBody(mockRes);
@@ -51,7 +50,6 @@ describe('collectBody', () => {
   });
 
   it('rejects when the stream emits an error', async () => {
-    const { EventEmitter } = require('node:events');
     const mockRes = new EventEmitter();
 
     const promise = collectBody(mockRes);
@@ -132,11 +130,36 @@ describe('saveFile', () => {
   });
 });
 
+// Shared test helpers
+
+const { EventEmitter } = require('node:events');
+
+/**
+ * Helper: creates a minimal IncomingMessage-like EventEmitter.
+ */
+function makeResponse({ statusCode = 200, headers = {}, body = '' } = {}) {
+  const res = new EventEmitter();
+  res.statusCode = statusCode;
+  res.headers = headers;
+  // Schedule body/end asynchronously so the promise chain runs first
+  setImmediate(() => {
+    res.emit('data', typeof body === 'string' ? Buffer.from(body) : body);
+    res.emit('end');
+  });
+  return res;
+}
+
+/**
+ * Helper: creates a minimal https.get return stub with an .on() method.
+ */
+function makeReq() {
+  return { on: jest.fn().mockReturnThis() };
+}
+
 // fetchUrl
 
 describe('fetchUrl', () => {
   const https = require('node:https');
-  const { EventEmitter } = require('node:events');
 
   let httpsGetSpy;
 
@@ -147,28 +170,6 @@ describe('fetchUrl', () => {
   afterEach(() => {
     jest.restoreAllMocks();
   });
-
-  /**
-   * Helper: creates a minimal IncomingMessage-like EventEmitter.
-   */
-  function makeResponse({ statusCode = 200, headers = {}, body = 'ok' }) {
-    const res = new EventEmitter();
-    res.statusCode = statusCode;
-    res.headers = headers;
-    // Schedule body/end asynchronously so the promise chain runs first
-    setImmediate(() => {
-      res.emit('data', Buffer.from(body));
-      res.emit('end');
-    });
-    return res;
-  }
-
-  /**
-   * Helper: creates a minimal https.get return stub with an .on() method.
-   */
-  function makeReq() {
-    return { on: jest.fn().mockReturnThis() };
-  }
 
   it('resolves with the body buffer for a 200 response', async () => {
     const res = makeResponse({ body: 'hello world' });
@@ -280,7 +281,6 @@ describe('syncDistribution', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const os = require('node:os');
-  const { EventEmitter } = require('node:events');
 
   let tmpDir;
   let httpsGetSpy;
@@ -294,21 +294,6 @@ describe('syncDistribution', () => {
     jest.restoreAllMocks();
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
-
-  function makeResponse({ statusCode = 200, headers = {}, body = '' }) {
-    const res = new EventEmitter();
-    res.statusCode = statusCode;
-    res.headers = headers;
-    setImmediate(() => {
-      res.emit('data', typeof body === 'string' ? Buffer.from(body) : body);
-      res.emit('end');
-    });
-    return res;
-  }
-
-  function makeReq() {
-    return { on: jest.fn().mockReturnThis() };
-  }
 
   it('returns true when all files are fetched successfully', async () => {
     const manifest = {
@@ -449,7 +434,6 @@ describe('main', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const os = require('node:os');
-  const { EventEmitter } = require('node:events');
 
   let tmpDir;
   let httpsGetSpy;
@@ -480,20 +464,6 @@ describe('main', () => {
     }
   });
 
-  function makeResponse({ statusCode = 200, headers = {}, body = '' }) {
-    const res = new EventEmitter();
-    res.statusCode = statusCode;
-    res.headers = headers;
-    setImmediate(() => {
-      res.emit('data', Buffer.from(body));
-      res.emit('end');
-    });
-    return res;
-  }
-
-  function makeReq() {
-    return { on: jest.fn().mockReturnThis() };
-  }
 
   it('completes successfully when all distributions sync without error', async () => {
     // main() reads DISTRIBUTIONS at module load time, so we call syncDistribution

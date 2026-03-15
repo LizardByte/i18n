@@ -483,8 +483,8 @@ async function syncExistingIssue(ghIssue, crowdinIssue, projectId, projectSlug) 
   if (ghIssue.body !== expectedBody) patch.body = expectedBody;
 
   // Compare label sets (order-independent).
-  const currentLabels = (ghIssue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)).sort();
-  const desiredLabels = [...expectedLabels].sort();
+  const currentLabels = (ghIssue.labels ?? []).map((l) => (typeof l === 'string' ? l : l.name)).sort((a, b) => a.localeCompare(b));
+  const desiredLabels = [...expectedLabels].sort((a, b) => a.localeCompare(b));
   if (JSON.stringify(currentLabels) !== JSON.stringify(desiredLabels)) {
     patch.labels = expectedLabels;
     // Ensure any new labels exist before applying them.

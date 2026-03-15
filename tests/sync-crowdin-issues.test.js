@@ -367,12 +367,12 @@ describe('ensureIssueLabels', () => {
     jest.clearAllMocks();
     jest.spyOn(console, 'log').mockImplementation(() => {});
     jest.spyOn(console, 'warn').mockImplementation(() => {});
+    mockCreateLabel.mockResolvedValue({});
   });
 
   afterEach(() => jest.restoreAllMocks());
 
   it('creates the type label and one language label for a simple language', async () => {
-    mockCreateLabel.mockResolvedValue({});
     await ensureIssueLabels({ issueType: 'source_mistake', languageId: 'fr' });
     const names = mockCreateLabel.mock.calls.map((c) => c[0].name);
     expect(names).toContain('type:source-mistake');
@@ -380,7 +380,6 @@ describe('ensureIssueLabels', () => {
   });
 
   it('creates two language labels for a compound language (pt-BR)', async () => {
-    mockCreateLabel.mockResolvedValue({});
     await ensureIssueLabels({ issueType: 'general_question', languageId: 'pt-BR' });
     const names = mockCreateLabel.mock.calls.map((c) => c[0].name);
     expect(names).toContain('lang:pt');
@@ -388,28 +387,24 @@ describe('ensureIssueLabels', () => {
   });
 
   it('uses TYPE_LABEL_COLOR for the type label', async () => {
-    mockCreateLabel.mockResolvedValue({});
     await ensureIssueLabels({ issueType: 'source_mistake', languageId: 'fr' });
     const typeCall = mockCreateLabel.mock.calls.find((c) => c[0].name === 'type:source-mistake');
     expect(typeCall[0].color).toBe(TYPE_LABEL_COLOR);
   });
 
   it('uses LANG_LABEL_COLOR for language labels', async () => {
-    mockCreateLabel.mockResolvedValue({});
     await ensureIssueLabels({ issueType: 'source_mistake', languageId: 'fr' });
     const langCall = mockCreateLabel.mock.calls.find((c) => c[0].name === 'lang:fr');
     expect(langCall[0].color).toBe(LANG_LABEL_COLOR);
   });
 
   it('skips language label creation when languageId is absent', async () => {
-    mockCreateLabel.mockResolvedValue({});
     await ensureIssueLabels({ issueType: 'general_question', languageId: null });
     const names = mockCreateLabel.mock.calls.map((c) => c[0].name);
     expect(names.every((n) => !n.startsWith('lang:'))).toBe(true);
   });
 
   it('uses the raw issueType as description when not in TYPE_MAP', async () => {
-    mockCreateLabel.mockResolvedValue({});
     await ensureIssueLabels({ issueType: 'unknown_type', languageId: null });
     const typeCall = mockCreateLabel.mock.calls.find((c) => c[0].name === 'type:unknown-type');
     expect(typeCall[0].description).toBe('unknown_type');
@@ -610,7 +605,7 @@ describe('buildIssueBody', () => {
   it('places the marker as the last line', () => {
     const body = buildIssueBody(baseIssue, projectId);
     const lines = body.split('\n');
-    expect(MARKER_RE.test(lines[lines.length - 1])).toBe(true);
+    expect(MARKER_RE.test(lines.at(-1))).toBe(true);
   });
 
   it('includes the Crowdin ID in the table', () => {
@@ -622,6 +617,8 @@ describe('buildIssueBody', () => {
     expect(body).toContain('### Language Managers');
     expect(body).toContain('@fake-github');
     expect(body).toContain('https://crowdin.com/profile/fake-crowdin');
+    // Marker must still be the last line even when the managers section is present
+    expect(MARKER_RE.test(body.split('\n').at(-1))).toBe(true);
   });
 
   it('includes multiple GitHub mentions for a language with multiple managers', () => {
@@ -646,12 +643,6 @@ describe('buildIssueBody', () => {
   it('omits Language Managers section when languageId is absent', () => {
     const body = buildIssueBody({ ...baseIssue, languageId: undefined }, projectId);
     expect(body).not.toContain('### Language Managers');
-  });
-
-  it('places the marker as the last line even when managers section is present', () => {
-    const body = buildIssueBody({ ...baseIssue, languageId: 'xx' }, projectId);
-    const lines = body.split('\n');
-    expect(MARKER_RE.test(lines[lines.length - 1])).toBe(true);
   });
 });
 
