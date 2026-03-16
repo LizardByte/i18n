@@ -68,7 +68,7 @@ describe('processInBatches', () => {
     await processInBatches(items, 2, async (item) => {
       results.push(item);
     });
-    expect(results.sort()).toEqual([1, 2, 3, 4, 5]);
+    expect(results.toSorted((a, b) => a - b)).toEqual([1, 2, 3, 4, 5]);
   });
 
   it('processes in batches no larger than batchSize', async () => {
