@@ -395,7 +395,7 @@ function buildIssueBody(crowdinIssue, projectId, projectSlug) {
   // URL format: /editor/{slug}/{fileId}/en-{normalizedLang}?view=comfortable#{stringId}
   // The language segment strips hyphens and lowercases (e.g. "zh-CN" → "en-zhcn").
   const stringId = crowdinIssue.string?.id;
-  const fileId = crowdinIssue.string?.file?.id;
+  const fileId = crowdinIssue.string?.fileId;
   let crowdinUrl;
   if (projectSlug && crowdinIssue.languageId && fileId && stringId) {
     const normalizedLang = crowdinIssue.languageId.replaceAll(/[-_]/g, '').toLowerCase();
