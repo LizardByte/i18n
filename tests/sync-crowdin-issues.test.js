@@ -1047,6 +1047,13 @@ describe('createNewIssue', () => {
 
 // syncProject
 
+/** Helper: run syncProject and advance fake timers so setTimeout resolves. */
+async function runSync(projectId, existingMap) {
+  const p = syncProject(projectId, existingMap);
+  await jest.runAllTimersAsync();
+  return p;
+}
+
 describe('syncProject', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -1060,12 +1067,6 @@ describe('syncProject', () => {
     jest.restoreAllMocks();
   });
 
-  /** Helper: run syncProject and advance fake timers so setTimeout resolves. */
-  async function runSync(projectId, existingMap) {
-    const p = syncProject(projectId, existingMap);
-    await jest.runAllTimersAsync();
-    return p;
-  }
 
   it('creates a new GH issue for an unresolved Crowdin issue not in the map', async () => {
     const issue = makeCrowdinIssue({ id: 5, issueStatus: 'unresolved' });
