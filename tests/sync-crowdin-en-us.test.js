@@ -42,8 +42,7 @@ import { Client as CrowdinClient } from '@crowdin/crowdin-api-client';
 import {
   EN_US,
   fetchSourceStrings,
-  fetchProjectApprovals,
-  fetchProjectTranslations,
+  fetchApprovedProjectTranslations,
   fetchTranslations,
   fetchApprovals,
   addTranslation,
@@ -535,39 +534,9 @@ describe('syncStringTranslation', () => {
   });
 });
 
-// fetchProjectApprovals
+// fetchApprovedProjectTranslations
 
-describe('fetchProjectApprovals', () => {
-  beforeEach(() => jest.clearAllMocks());
-
-  it('returns unwrapped approval data objects', async () => {
-    const raw = [
-      { data: makeApproval({ id: 30, translationId: 20 }) },
-      { data: makeApproval({ id: 31, translationId: 21 }) },
-    ];
-    mockListTranslationApprovals.mockResolvedValue({ data: raw });
-
-    const result = await fetchProjectApprovals('42');
-    expect(result).toHaveLength(2);
-    expect(result[0].id).toBe(30);
-    expect(result[1].id).toBe(31);
-  });
-
-  it('returns an empty array when response.data is null/undefined', async () => {
-    mockListTranslationApprovals.mockResolvedValue({});
-    expect(await fetchProjectApprovals('42')).toEqual([]);
-  });
-
-  it('calls listTranslationApprovals with projectId and EN_US only (no stringId)', async () => {
-    mockListTranslationApprovals.mockResolvedValue({ data: [] });
-    await fetchProjectApprovals('42');
-    expect(mockListTranslationApprovals).toHaveBeenCalledWith('42', { languageId: EN_US });
-  });
-});
-
-// fetchProjectTranslations
-
-describe('fetchProjectTranslations', () => {
+describe('fetchApprovedProjectTranslations', () => {
   beforeEach(() => jest.clearAllMocks());
 
   it('returns unwrapped translation data objects', async () => {
@@ -577,7 +546,7 @@ describe('fetchProjectTranslations', () => {
     ];
     mockListLanguageTranslations.mockResolvedValue({ data: raw });
 
-    const result = await fetchProjectTranslations('42');
+    const result = await fetchApprovedProjectTranslations('42');
     expect(result).toHaveLength(2);
     expect(result[0].translationId).toBe(10);
     expect(result[1].translationId).toBe(11);
@@ -585,14 +554,14 @@ describe('fetchProjectTranslations', () => {
 
   it('returns an empty array when response.data is null/undefined', async () => {
     mockListLanguageTranslations.mockResolvedValue({});
-    expect(await fetchProjectTranslations('42')).toEqual([]);
+    expect(await fetchApprovedProjectTranslations('42')).toEqual([]);
   });
 
-  it('calls listLanguageTranslations with projectId and EN_US', async () => {
+  it('calls listLanguageTranslations with projectId, EN_US, and approvedOnly:1', async () => {
     mockListLanguageTranslations.mockResolvedValue({ data: [] });
-    await fetchProjectTranslations('42');
+    await fetchApprovedProjectTranslations('42');
     expect(mockTranslationsWithFetchAll).toHaveBeenCalled();
-    expect(mockListLanguageTranslations).toHaveBeenCalledWith('42', EN_US);
+    expect(mockListLanguageTranslations).toHaveBeenCalledWith('42', EN_US, { approvedOnly: 1 });
   });
 });
 
@@ -601,61 +570,45 @@ describe('fetchProjectTranslations', () => {
 describe('isFullyApproved', () => {
   it('returns true for a plain string with an approved translation', () => {
     const string = makeSourceString({ id: 1, text: 'Hello' });
-    const approvedIds = new Set([100]);
-    const stringTranslationMap = new Map([[1, [{ translationId: 100, pluralCategoryName: null }]]]);
-    expect(isFullyApproved(string, approvedIds, stringTranslationMap)).toBe(true);
+    const map = new Map([[1, new Set([null])]]);
+    expect(isFullyApproved(string, map)).toBe(true);
   });
 
   it('returns false for a plain string with no entry in the map', () => {
     const string = makeSourceString({ id: 1, text: 'Hello' });
-    const approvedIds = new Set();
-    const stringTranslationMap = new Map();
-    expect(isFullyApproved(string, approvedIds, stringTranslationMap)).toBe(false);
+    expect(isFullyApproved(string, new Map())).toBe(false);
   });
 
-  it('returns false for a plain string whose translation is not approved', () => {
+  it('returns false for a plain string whose category is not in the approved set', () => {
     const string = makeSourceString({ id: 1, text: 'Hello' });
-    const approvedIds = new Set([999]); // different ID
-    const stringTranslationMap = new Map([[1, [{ translationId: 100, pluralCategoryName: null }]]]);
-    expect(isFullyApproved(string, approvedIds, stringTranslationMap)).toBe(false);
+    // Map has the string but an empty set – no category approved
+    const map = new Map([[1, new Set()]]);
+    expect(isFullyApproved(string, map)).toBe(false);
   });
 
   it('returns true for a plural string when all forms are approved', () => {
     const string = makeSourceString({ id: 2, text: { one: 'One', other: 'Other' } });
-    const approvedIds = new Set([10, 11]);
-    const stringTranslationMap = new Map([[2, [
-      { translationId: 10, pluralCategoryName: 'one' },
-      { translationId: 11, pluralCategoryName: 'other' },
-    ]]]);
-    expect(isFullyApproved(string, approvedIds, stringTranslationMap)).toBe(true);
+    const map = new Map([[2, new Set(['one', 'other'])]]);
+    expect(isFullyApproved(string, map)).toBe(true);
   });
 
   it('returns false for a plural string when only some forms are approved', () => {
     const string = makeSourceString({ id: 2, text: { one: 'One', other: 'Other' } });
-    const approvedIds = new Set([10]); // only 'one' approved
-    const stringTranslationMap = new Map([[2, [
-      { translationId: 10, pluralCategoryName: 'one' },
-      { translationId: 11, pluralCategoryName: 'other' },
-    ]]]);
-    expect(isFullyApproved(string, approvedIds, stringTranslationMap)).toBe(false);
+    const map = new Map([[2, new Set(['one'])]]);
+    expect(isFullyApproved(string, map)).toBe(false);
   });
 
   it('returns false for a plural string when no forms are approved', () => {
     const string = makeSourceString({ id: 2, text: { one: 'One', other: 'Other' } });
-    const approvedIds = new Set();
-    const stringTranslationMap = new Map([[2, [
-      { translationId: 10, pluralCategoryName: 'one' },
-      { translationId: 11, pluralCategoryName: 'other' },
-    ]]]);
-    expect(isFullyApproved(string, approvedIds, stringTranslationMap)).toBe(false);
+    const map = new Map([[2, new Set()]]);
+    expect(isFullyApproved(string, map)).toBe(false);
   });
 
-  it('does not consider translations belonging to other strings', () => {
+  it('does not consider approvals belonging to other strings', () => {
     const string = makeSourceString({ id: 1, text: 'Hello' });
-    const approvedIds = new Set([200]);
-    // Only string 2 has translation 200; string 1 has no entry
-    const stringTranslationMap = new Map([[2, [{ translationId: 200, pluralCategoryName: null }]]]);
-    expect(isFullyApproved(string, approvedIds, stringTranslationMap)).toBe(false);
+    // Only string 2 has an approved null category; string 1 has no entry
+    const map = new Map([[2, new Set([null])]]);
+    expect(isFullyApproved(string, map)).toBe(false);
   });
 });
 
@@ -672,9 +625,9 @@ describe('syncProject', () => {
   it('logs the project and string count', async () => {
     const strings = [makeSourceString({ id: 1 }), makeSourceString({ id: 2 })];
     mockListProjectStrings.mockResolvedValue({ data: strings.map((s) => ({ data: s })) });
-    mockListTranslationApprovals.mockResolvedValue({ data: [] });
     mockListLanguageTranslations.mockResolvedValue({ data: [] });
     mockListStringTranslations.mockResolvedValue({ data: [] });
+    mockListTranslationApprovals.mockResolvedValue({ data: [] });
     mockAddTranslation.mockResolvedValue({ data: { id: 50 } });
     mockAddApproval.mockResolvedValue({ data: { id: 200 } });
 
@@ -687,50 +640,45 @@ describe('syncProject', () => {
   it('processes strings that are not fully approved', async () => {
     const strings = [makeSourceString({ id: 10 }), makeSourceString({ id: 11 })];
     mockListProjectStrings.mockResolvedValue({ data: strings.map((s) => ({ data: s })) });
-    // No project-level approvals → both strings need processing
-    mockListTranslationApprovals.mockResolvedValue({ data: [] });
+    // No approved translations upfront → both strings need processing
     mockListLanguageTranslations.mockResolvedValue({ data: [] });
     mockListStringTranslations.mockResolvedValue({ data: [] });
+    mockListTranslationApprovals.mockResolvedValue({ data: [] });
     mockAddTranslation.mockResolvedValue({ data: { id: 50 } });
     mockAddApproval.mockResolvedValue({ data: { id: 200 } });
 
     await syncProject('42');
 
-    // One pair of fetchTranslations+fetchApprovals per string that needs processing
+    // One fetchTranslations call per string that needs processing
     expect(mockListStringTranslations).toHaveBeenCalledTimes(2);
   });
 
   it('skips strings that are already fully approved', async () => {
     const string = makeSourceString({ id: 5, text: 'Hello' });
     mockListProjectStrings.mockResolvedValue({ data: [{ data: string }] });
-    mockListTranslationApprovals.mockResolvedValue({
-      data: [{ data: makeApproval({ translationId: 77 }) }],
-    });
+    // approvedOnly response includes stringId=5, category=null → fully covered
     mockListLanguageTranslations.mockResolvedValue({
       data: [{ data: { translationId: 77, stringId: 5, pluralCategoryName: null } }],
     });
 
     await syncProject('42');
 
-    // No per-string API calls should have been made
     expect(mockListStringTranslations).not.toHaveBeenCalled();
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('1 string(s) skipped'));
   });
 
-  it('processes only the strings that are not fully approved, skipping the rest', async () => {
+  it('processes only unapproved strings, skipping the rest', async () => {
     const approvedString = makeSourceString({ id: 5, text: 'Hello' });
     const unapprovedString = makeSourceString({ id: 6, text: 'World' });
     mockListProjectStrings.mockResolvedValue({
       data: [{ data: approvedString }, { data: unapprovedString }],
     });
-    mockListTranslationApprovals.mockResolvedValue({
-      data: [{ data: makeApproval({ translationId: 77 }) }],
-    });
+    // Only string 5 is approved
     mockListLanguageTranslations.mockResolvedValue({
       data: [{ data: { translationId: 77, stringId: 5, pluralCategoryName: null } }],
     });
-    // Per-string calls for unapproved string
     mockListStringTranslations.mockResolvedValue({ data: [] });
+    mockListTranslationApprovals.mockResolvedValue({ data: [] });
     mockAddTranslation.mockResolvedValue({ data: { id: 50 } });
     mockAddApproval.mockResolvedValue({ data: { id: 200 } });
 
@@ -744,12 +692,6 @@ describe('syncProject', () => {
   it('skips a plural string only when all its forms are approved', async () => {
     const string = makeSourceString({ id: 8, text: { one: 'One', other: 'Other' } });
     mockListProjectStrings.mockResolvedValue({ data: [{ data: string }] });
-    mockListTranslationApprovals.mockResolvedValue({
-      data: [
-        { data: makeApproval({ translationId: 80 }) },
-        { data: makeApproval({ translationId: 81 }) },
-      ],
-    });
     // Two entries share the same stringId=8 — exercises the map-accumulation branch
     mockListLanguageTranslations.mockResolvedValue({
       data: [
@@ -765,8 +707,22 @@ describe('syncProject', () => {
   });
 
   it('does not log skipped message when no strings are skipped', async () => {
-    mockListProjectStrings.mockResolvedValue({ data: [] });
+    const string = makeSourceString({ id: 7, text: 'Test' });
+    mockListProjectStrings.mockResolvedValue({ data: [{ data: string }] });
+    mockListLanguageTranslations.mockResolvedValue({ data: [] });
+    mockListStringTranslations.mockResolvedValue({ data: [] });
     mockListTranslationApprovals.mockResolvedValue({ data: [] });
+    mockAddTranslation.mockResolvedValue({ data: { id: 50 } });
+    mockAddApproval.mockResolvedValue({ data: { id: 200 } });
+
+    await syncProject('42');
+
+    const logs = console.log.mock.calls.map((c) => c[0]);
+    expect(logs.some((m) => m.includes('skipped'))).toBe(false);
+  });
+
+  it('handles a project with no source strings', async () => {
+    mockListProjectStrings.mockResolvedValue({ data: [] });
     mockListLanguageTranslations.mockResolvedValue({ data: [] });
 
     await syncProject('99');
@@ -802,7 +758,6 @@ describe('main', () => {
     });
 
     mockListProjectStrings.mockResolvedValue({ data: [] });
-    mockListTranslationApprovals.mockResolvedValue({ data: [] });
     mockListLanguageTranslations.mockResolvedValue({ data: [] });
 
     await freshMain();

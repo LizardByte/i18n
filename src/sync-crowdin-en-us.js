@@ -5,8 +5,8 @@
  *
  * The script is fully idempotent – each run will:
  *   • Fetch all source strings for each configured project.
- *   • Fetch all existing en_US approvals and translations for the project
- *     upfront (two API calls) and skip strings that are already fully approved,
+ *   • Fetch all already-approved en_US translations for the project upfront
+ *     (one API call) and skip strings that are already fully approved,
  *     significantly reducing per-string API usage.
  *   • For strings that need attention: check whether the en_US translation
  *     already exists and matches the source text (including plurals).
@@ -101,28 +101,17 @@ async function fetchApprovals(projectId, stringId) {
 }
 
 /**
- * Fetches all existing en_US approvals for an entire project in one call.
+ * Fetches all already-approved en_US translations for an entire project in
+ * one call, using the approvedOnly filter so no separate approvals request
+ * is needed.
  *
  * @param {string|number} projectId
- * @returns {Promise<object[]>}  Unwrapped Approval data objects.
+ * @returns {Promise<object[]>}  Unwrapped translation data objects (approved only).
  */
-async function fetchProjectApprovals(projectId) {
+async function fetchApprovedProjectTranslations(projectId) {
   const response = await crowdin.stringTranslationsApi
     .withFetchAll()
-    .listTranslationApprovals(projectId, { languageId: EN_US });
-  return (response.data ?? []).map((item) => item.data);
-}
-
-/**
- * Fetches all existing en_US translations for an entire project in one call.
- *
- * @param {string|number} projectId
- * @returns {Promise<object[]>}  Unwrapped translation data objects.
- */
-async function fetchProjectTranslations(projectId) {
-  const response = await crowdin.stringTranslationsApi
-    .withFetchAll()
-    .listLanguageTranslations(projectId, EN_US);
+    .listLanguageTranslations(projectId, EN_US, { approvedOnly: 1 });
   return (response.data ?? []).map((item) => item.data);
 }
 
@@ -233,21 +222,15 @@ async function ensureTranslation(projectId, stringId, expectedText, pluralCatego
  * Determines whether all plural forms (or the single plain form) of a source
  * string already have an approved en_US translation.
  *
- * @param {object}         sourceString
- * @param {Set<number>}    approvedTranslationIds
- * @param {Map<number, Array<{translationId: number, pluralCategoryName: string|null}>>} stringTranslationMap
- *   Maps stringId → array of {translationId, pluralCategoryName} entries for
- *   that string's en_US translations.
+ * @param {object} sourceString
+ * @param {Map<number, Set<string|null>>} approvedCategoriesByStringId
+ *   Maps stringId → Set of pluralCategoryName values (or null for plain strings)
+ *   that already have an approved en_US translation.
  * @returns {boolean}
  */
-function isFullyApproved(sourceString, approvedTranslationIds, stringTranslationMap) {
+function isFullyApproved(sourceString, approvedCategoriesByStringId) {
   const expectedEntries = normalisedTextEntries(sourceString.text);
-  const translations = stringTranslationMap.get(sourceString.id) ?? [];
-  const approvedCategories = new Set(
-    translations
-      .filter((t) => approvedTranslationIds.has(t.translationId))
-      .map((t) => t.pluralCategoryName),
-  );
+  const approvedCategories = approvedCategoriesByStringId.get(sourceString.id) ?? new Set();
   return expectedEntries.every(({ pluralCategoryName }) =>
     approvedCategories.has(pluralCategoryName),
   );
@@ -307,33 +290,24 @@ async function syncStringTranslation(projectId, sourceString) {
 async function syncProject(projectId) {
   console.log(`\n── Project ${projectId} ──`);
 
-  // Fetch source strings and all en_US approvals/translations in parallel.
-  const [strings, projectApprovals, projectTranslations] = await Promise.all([
+  // Fetch source strings and all approved en_US translations in parallel.
+  const [strings, approvedTranslations] = await Promise.all([
     fetchSourceStrings(projectId),
-    fetchProjectApprovals(projectId),
-    fetchProjectTranslations(projectId),
+    fetchApprovedProjectTranslations(projectId),
   ]);
   console.log(`  ${strings.length} source string(s) found.`);
 
-  // Build a set of approved translation IDs.
-  const approvedTranslationIds = new Set(projectApprovals.map((a) => a.translationId));
-
-  // Build a map: stringId → [{translationId, pluralCategoryName}] for all
-  // en_US translations in the project, so isFullyApproved can check coverage
-  // per-string without cross-string contamination.
-  const stringTranslationMap = new Map();
-  for (const t of projectTranslations) {
+  // Build a map: stringId → Set<pluralCategoryName|null> of approved categories.
+  const approvedCategoriesByStringId = new Map();
+  for (const t of approvedTranslations) {
     const sid = t.stringId;
-    if (!stringTranslationMap.has(sid)) stringTranslationMap.set(sid, []);
-    stringTranslationMap.get(sid).push({
-      translationId: t.translationId,
-      pluralCategoryName: t.pluralCategoryName ?? null,
-    });
+    if (!approvedCategoriesByStringId.has(sid)) approvedCategoriesByStringId.set(sid, new Set());
+    approvedCategoriesByStringId.get(sid).add(t.pluralCategoryName ?? null);
   }
 
   let skipped = 0;
   for (const string of strings) {
-    if (isFullyApproved(string, approvedTranslationIds, stringTranslationMap)) {
+    if (isFullyApproved(string, approvedCategoriesByStringId)) {
       skipped++;
       continue;
     }
@@ -370,8 +344,7 @@ if (_isMain) {
 export {
   EN_US,
   fetchSourceStrings,
-  fetchProjectApprovals,
-  fetchProjectTranslations,
+  fetchApprovedProjectTranslations,
   fetchTranslations,
   fetchApprovals,
   addTranslation,
