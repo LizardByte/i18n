@@ -1,42 +1,36 @@
 ---
-# Syncs source-string issues from Crowdin to this repository's GitHub Issues.
+# Ensures that en_US translations in Crowdin exactly mirror the source strings,
+# and automatically approves them.
 #
-# Each GitHub issue created by this workflow contains a hidden HTML comment
-# acting as a deduplication key:
-#
-#   <!-- crowdin-issue-id:PROJECT_ID:ISSUE_ID -->
-#
-# On every run the script reads all GitHub issues carrying the "crowdin" label
-# and compares them against the live Crowdin data:
-#
-#   • Creates a new GitHub issue for each open Crowdin issue with no matching
-#     GitHub issue.
-#   • Closes a GitHub issue when the corresponding Crowdin issue is resolved.
-#   • Re-opens a GitHub issue when a resolved Crowdin issue is re-opened.
+# For each configured project the script will:
+#   • Fetch all source strings.
+#   • For each source string, verify that the en_US translation matches.
+#   • Add the translation if it is missing.
+#   • Replace the translation if it is stale (does not match the source).
+#   • Approve the en_US translation if it is not already approved.
 #
 # Required GitHub repository configuration:
 #   secrets.CROWDIN_TOKEN        – Crowdin personal access token
-#   secrets.GH_BOT_TOKEN         – GitHub PAT with "issues: write" permission
 #   vars.CROWDIN_PROJECT_IDS     – Comma-separated list of Crowdin project IDs
 #                                  (e.g. "123456" or "123456,789012")
 
-name: Sync Crowdin Issues
+name: Sync Crowdin en_US Translations
 permissions: {}
 
 on:
   schedule:
-    # Run every 6 hours so issues stay reasonably fresh.
+    # Run every 6 hours so translations stay in sync with source strings.
     - cron: '0 */6 * * *'
   workflow_dispatch:  # Allow ad-hoc manual runs
 
 # Only one sync at a time; never cancel an in-progress run.
 concurrency:
-  group: crowdin-issues-sync
+  group: crowdin-en-us-sync
   cancel-in-progress: false
 
 jobs:
   sync:
-    name: Sync Crowdin issues to GitHub Issues
+    name: Sync en_US translations to match source strings
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -54,10 +48,8 @@ jobs:
       - name: Install dependencies
         run: npm install --ignore-scripts
 
-      - name: Sync Crowdin issues to GitHub Issues
+      - name: Sync en_US translations
         env:
           CROWDIN_TOKEN: ${{ secrets.CROWDIN_TOKEN }}
           CROWDIN_PROJECT_IDS: ${{ vars.CROWDIN_PROJECT_IDS }}
-          GH_BOT_TOKEN: ${{ secrets.GH_BOT_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: node src/sync-crowdin-issues.js
+        run: node src/sync-crowdin-en-us.js
