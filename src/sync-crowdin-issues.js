@@ -36,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { Client as CrowdinClient } from '@crowdin/crowdin-api-client';
 import { Octokit } from '@octokit/rest';
+import { parseCrowdinProjectIds, validateEnv } from './common.js';
 
 const _require = createRequire(import.meta.url);
 /** @type {Record<string, Array<{discord: string, crowdin: string, github: string|null}>>} */
@@ -50,23 +51,11 @@ const CROWDIN_TOKEN = process.env.CROWDIN_TOKEN;
 const GH_BOT_TOKEN = process.env.GH_BOT_TOKEN;
 const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY; // "owner/repo"
 
-const CROWDIN_PROJECT_IDS = (process.env.CROWDIN_PROJECT_IDS ?? '')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+const CROWDIN_PROJECT_IDS = parseCrowdinProjectIds();
 
 /* istanbul ignore next */
 if (_isMain) {
-  for (const [name, val] of Object.entries({ CROWDIN_TOKEN, GH_BOT_TOKEN, GITHUB_REPOSITORY })) {
-    if (val) continue;
-    console.error(`ERROR: environment variable ${name} is required.`);
-    process.exit(1);
-  }
-
-  if (CROWDIN_PROJECT_IDS.length === 0) {
-    console.error('ERROR: CROWDIN_PROJECT_IDS environment variable is not set or empty.');
-    process.exit(1);
-  }
+  validateEnv(['CROWDIN_TOKEN', 'GH_BOT_TOKEN', 'GITHUB_REPOSITORY'], CROWDIN_PROJECT_IDS);
 }
 
 const [GH_OWNER, GH_REPO] = (GITHUB_REPOSITORY ?? '/').split('/');

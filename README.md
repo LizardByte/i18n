@@ -21,10 +21,10 @@ and mirrored via [jsdelivr](https://www.jsdelivr.com/) to avoid using Crowdin's 
 
 ## ✨ Projects
 
-| **Project**                                                    | **Completion Status**                                                                                 | **Contributors**                                                                                                         |
-|----------------------------------------------------------------|-------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|
-| [LizardByte](https://translate.lizardbyte.dev)                 | ![LizardByte completion](https://app.lizardbyte.dev/dashboard/crowdin/LizardByte_graph.svg)           | ![LizardByte Crowdin](https://raw.githubusercontent.com/LizardByte/contributors/refs/heads/dist/crowdin.606145.svg)      |
-| [LizardByte-docs](https://crowdin.com/project/lizardbyte-docs) | ![LizardByte-docs completion](https://app.lizardbyte.dev/dashboard/crowdin/LizardByte_docs_graph.svg) | ![LizardByte-docs Crowdin](https://raw.githubusercontent.com/LizardByte/contributors/refs/heads/dist/crowdin.614257.svg) |
+| **Project**                                                    | **Completion Status**                                                                                                                   | **Contributors**                                                                                                          |
+|----------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
+| [LizardByte](https://translate.lizardbyte.dev)                 | ![LizardByte completion](https://raw.githubusercontent.com/LizardByte/i18n/refs/heads/crowdin-progress/LizardByte_graph.svg?)           | ![LizardByte Crowdin](https://raw.githubusercontent.com/LizardByte/contributors/refs/heads/dist/crowdin.606145.svg?)      |
+| [LizardByte-docs](https://crowdin.com/project/lizardbyte-docs) | ![LizardByte-docs completion](https://raw.githubusercontent.com/LizardByte/i18n/refs/heads/crowdin-progress/LizardByte_docs_graph.svg?) | ![LizardByte-docs Crowdin](https://raw.githubusercontent.com/LizardByte/contributors/refs/heads/dist/crowdin.614257.svg?) |
 
 ## 👥 Contributing
 

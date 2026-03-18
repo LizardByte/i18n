@@ -24,6 +24,7 @@
 
 import { fileURLToPath } from 'node:url';
 import { Client as CrowdinClient } from '@crowdin/crowdin-api-client';
+import { parseCrowdinProjectIds, validateEnv } from './common.js';
 
 // Determine whether this module is being run directly.
 const _isMain = process.argv[1] === fileURLToPath(import.meta.url);
@@ -32,22 +33,11 @@ const _isMain = process.argv[1] === fileURLToPath(import.meta.url);
 
 const CROWDIN_TOKEN = process.env.CROWDIN_TOKEN;
 
-const CROWDIN_PROJECT_IDS = (process.env.CROWDIN_PROJECT_IDS ?? '')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+const CROWDIN_PROJECT_IDS = parseCrowdinProjectIds();
 
 /* istanbul ignore next */
 if (_isMain) {
-  if (!CROWDIN_TOKEN) {
-    console.error('ERROR: environment variable CROWDIN_TOKEN is required.');
-    process.exit(1);
-  }
-
-  if (CROWDIN_PROJECT_IDS.length === 0) {
-    console.error('ERROR: CROWDIN_PROJECT_IDS environment variable is not set or empty.');
-    process.exit(1);
-  }
+  validateEnv(['CROWDIN_TOKEN'], CROWDIN_PROJECT_IDS);
 }
 
 /** The Crowdin language ID for American English (the source-mirror language). */
