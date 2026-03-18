@@ -66,6 +66,13 @@ const PROGRESS_LABEL = 'crowdin-progress';
 /** Color for the progress label. */
 const PROGRESS_LABEL_COLOR = '0e8a16';
 
+/** Guidance shown at the top of the pinned issue for language managers. */
+const PINNED_ISSUE_APPROVAL_NOTE = [
+  '> [!NOTE]',
+  '> Language managers: approve translations in Crowdin via the Online Editor Proofreading workflow:',
+  '> https://support.crowdin.com/online-editor/#proofreading',
+].join('\n');
+
 // Initialize API clients
 const crowdin = new CrowdinClient({ token: CROWDIN_TOKEN });
 
@@ -318,6 +325,8 @@ function buildPinnedIssueBody(projectsData) {
   });
 
   return [
+    PINNED_ISSUE_APPROVAL_NOTE,
+    '',
     `_Last updated: ${updatedAt}_`,
     '',
     ...sections.flatMap((s) => [s, '']),
