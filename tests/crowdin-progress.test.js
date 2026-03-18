@@ -61,8 +61,14 @@ jest.mock('../language-managers.json', () => ({
     { discord: 'fake-discord-de', crowdin: 'fake-crowdin-de', github: 'fake-github-de' },
     { discord: 'fake-discord-de2', crowdin: 'fake-crowdin-de2', github: 'fake-github-de2' },
   ],
+  'es': [
+    { discord: 'fake-discord-es', crowdin: 'fake-crowdin-es', github: 'fake-github-es' },
+  ],
   'ja': [
     { discord: 'fake-discord-ja', crowdin: 'fake-crowdin-ja', github: null },
+  ],
+  'pt': [
+    { discord: 'fake-discord-pt', crowdin: 'fake-crowdin-pt', github: 'fake-github-pt' },
   ],
   'pt-BR': [
     { discord: 'fake-discord-ptbr', crowdin: 'fake-crowdin-ptbr', github: 'fake-github-ptbr' },
@@ -233,16 +239,22 @@ describe('getLanguageManagers', () => {
     expect(managers[0].github).toBe('fake-github-fr');
   });
 
-  it('normalises underscore separators', () => {
-    expect(getLanguageManagers('pt_BR')).toEqual(getLanguageManagers('pt-BR'));
+  it.each([
+    ['pt_BR', 'pt-BR'],
+    ['pt-br', 'pt-BR'],
+    ['es-ES', 'es'],
+    ['pt_PT', 'pt'],
+    ['esES', 'es'],
+  ])('resolves %s the same as %s', (inputCode, expectedCode) => {
+    expect(getLanguageManagers(inputCode)).toEqual(getLanguageManagers(expectedCode));
   });
 
-  it('returns an empty array for a language with no managers', () => {
-    expect(getLanguageManagers('aa')).toEqual([]);
+  it('handles multi-level locale variants with no configured managers', () => {
+    expect(getLanguageManagers('zz-Hant-TW')).toEqual([]);
   });
 
-  it('returns an empty array for an unknown language', () => {
-    expect(getLanguageManagers('zz')).toEqual([]);
+  it.each(['aa', 'zz', 'abcd'])('returns an empty array for %s when no managers are found', (languageId) => {
+    expect(getLanguageManagers(languageId)).toEqual([]);
   });
 
   it('returns an empty array when languageId is null', () => {
@@ -263,6 +275,14 @@ describe('formatManagers', () => {
     const result = formatManagers('de');
     expect(result).toContain('@fake-github-de');
     expect(result).toContain('@fake-github-de2');
+  });
+
+  it('falls back to base language managers for regional language ids', () => {
+    expect(formatManagers('es-ES')).toBe('@fake-github-es');
+  });
+
+  it('supports compact locale ids when formatting manager mentions', () => {
+    expect(formatManagers('ptPT')).toBe('@fake-github-pt');
   });
 
   it('falls back to discord handle when github is null', () => {
