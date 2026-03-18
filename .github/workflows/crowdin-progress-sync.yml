@@ -1,0 +1,94 @@
+---
+# Fetches translation/approval progress for every Crowdin project and:
+#   1. Upserts a single pinned GitHub issue whose body contains a Markdown
+#      table per project with per-language translation and approval percentages,
+#      sorted by lowest approval percentage first.
+#   2. Generates per-project SVG progress graphs and commits them to the
+#      dedicated `crowdin-progress` branch so they can be embedded in READMEs
+#      or other documents via jsDelivr or raw GitHub URLs.
+#
+# Required GitHub repository configuration:
+#   secrets.CROWDIN_TOKEN        – Crowdin personal access token
+#   secrets.GH_BOT_TOKEN         – GitHub PAT with "issues: write" and
+#                                  "contents: write" permissions
+#   vars.CROWDIN_PROJECT_IDS     – Comma-separated list of Crowdin project IDs
+#                                  (e.g. "123456" or "123456,789012")
+#   vars.GH_BOT_NAME             – Git commit author name
+#   secrets.GH_BOT_EMAIL         – Git commit author email
+
+name: Sync Crowdin Progress
+permissions: {}
+
+on:
+  schedule:
+    # Run once a day so progress stays reasonably fresh.
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow ad-hoc manual runs
+
+# Only one sync at a time; never cancel an in-progress run.
+concurrency:
+  group: crowdin-progress-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync Crowdin progress to pinned issue and SVG branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+    if: github.repository_owner == 'LizardByte'  # don't run for forks
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6.0.2
+        with:
+          token: ${{ secrets.GH_BOT_TOKEN }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f  # v6.3.0
+        with:
+          node-version: 'node'
+
+      - name: Install dependencies
+        run: npm install --ignore-scripts
+
+      - name: Sync Crowdin progress
+        env:
+          CROWDIN_TOKEN: ${{ secrets.CROWDIN_TOKEN }}
+          CROWDIN_PROJECT_IDS: ${{ vars.CROWDIN_PROJECT_IDS }}
+          GH_BOT_TOKEN: ${{ secrets.GH_BOT_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SVG_OUTPUT_DIR: /tmp/crowdin-progress
+        run: node src/crowdin-progress.js
+
+      - name: Commit SVG graphs to crowdin-progress branch
+        env:
+          GH_BOT_NAME: ${{ vars.GH_BOT_NAME }}
+          GH_BOT_EMAIL: ${{ secrets.GH_BOT_EMAIL }}
+        run: |
+          git config user.name "${GH_BOT_NAME}"
+          git config user.email "${GH_BOT_EMAIL}"
+
+          # Create an orphan branch so it contains only SVG files with no
+          # history from main (keeps the branch lean).
+          git checkout --orphan crowdin-progress
+
+          # Remove every file inherited from the main checkout.
+          git rm -rf . --quiet
+
+          # Clean up any remaining untracked files / directories.
+          git clean -fdx
+
+          # Populate the branch with the freshly generated SVG files.
+          cp -r /tmp/crowdin-progress/. .
+
+          git add .
+
+          # Only commit when there are actual changes.
+          if git diff --staged --quiet; then
+            echo "No changes – SVG files are already up to date."
+          else
+            git commit -m "chore: update Crowdin progress SVGs"
+            git push origin crowdin-progress --force
+          fi

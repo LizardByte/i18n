@@ -18,6 +18,11 @@ import {
 // jest.fn() instances from the constructed objects via the constructor's
 // .mock.results.
 
+jest.mock('../src/common.js', () => ({
+  parseCrowdinProjectIds: jest.fn().mockReturnValue([]),
+  validateEnv: jest.fn(),
+}));
+
 jest.mock('@crowdin/crowdin-api-client', () => ({
   Client: jest.fn().mockImplementation(() => ({
     stringCommentsApi: {
@@ -1156,26 +1161,23 @@ describe('main', () => {
   });
 
   it('calls syncProject for each project ID when projects are configured', async () => {
-    // CROWDIN_PROJECT_IDS is frozen at module load; set env and use
-    // jest.isolateModulesAsync to load a fresh instance with projects.
     const origProjectIds = process.env.CROWDIN_PROJECT_IDS;
     process.env.CROWDIN_PROJECT_IDS = '999';
 
     let freshMain;
     await jest.isolateModulesAsync(async () => {
+      const common = await import('../src/common.js');
+      common.parseCrowdinProjectIds.mockReturnValue(['999']);
       const mod = await import('../src/sync-crowdin-issues.js');
       freshMain = mod.main;
     });
 
-    // freshMain uses the fresh module's CROWDIN_PROJECT_IDS = ['999']
-    // The fresh module still uses the mocked @crowdin and @octokit clients.
     const p = freshMain();
     await jest.runAllTimersAsync();
     await p;
 
     expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Sync complete'));
 
-    // Restore
     if (origProjectIds === undefined) delete process.env.CROWDIN_PROJECT_IDS;
     else process.env.CROWDIN_PROJECT_IDS = origProjectIds;
   });

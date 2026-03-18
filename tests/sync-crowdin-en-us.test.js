@@ -13,6 +13,11 @@ import {
 // before ANY other code runs. Therefore, the factory functions must be
 // completely self-contained and cannot reference variables declared below.
 
+jest.mock('../src/common.js', () => ({
+  parseCrowdinProjectIds: jest.fn().mockReturnValue([]),
+  validateEnv: jest.fn(),
+}));
+
 jest.mock('@crowdin/crowdin-api-client', () => ({
   Client: jest.fn().mockImplementation(() => ({
     sourceStringsApi: {
@@ -753,6 +758,9 @@ describe('main', () => {
 
     let freshMain;
     await jest.isolateModulesAsync(async () => {
+      // Make parseCrowdinProjectIds return the expected IDs for this isolated load.
+      const common = await import('../src/common.js');
+      common.parseCrowdinProjectIds.mockReturnValue(['111', '222']);
       const mod = await import('../src/sync-crowdin-en-us.js');
       freshMain = mod.main;
     });
