@@ -100,16 +100,104 @@ async function fetchProjectProgress(projectId) {
 }
 
 /**
+ * Resolves manager entries for a language key using exact match first,
+ * then a case-insensitive key comparison.
+ *
+ * @param {string} key
+ * @returns {Array<{discord: string, crowdin: string, github: string|null}>|undefined}
+ */
+function resolveManagersForKey(key) {
+  if (Object.hasOwn(languageManagers, key)) {
+    return languageManagers[key];
+  }
+
+  const lowerKey = key.toLowerCase();
+  const matchedKey = Object.keys(languageManagers).find((candidate) => candidate.toLowerCase() === lowerKey);
+  return matchedKey ? languageManagers[matchedKey] : undefined;
+}
+
+/**
+ * Expands compact locale strings like "esES" to "es-ES".
+ *
+ * @param {string} languageId
+ * @returns {string|null}
+ */
+function expandCompactLocale(languageId) {
+  if (languageId.includes('-')) return null;
+
+  const match = /^([A-Za-z]{2,3})([A-Za-z]{2})$/.exec(languageId);
+  if (!match) return null;
+
+  return `${match[1].toLowerCase()}-${match[2].toUpperCase()}`;
+}
+
+/**
+ * Returns progressively less specific fallback language keys.
+ * Example: "zh-Hant-TW" -> ["zh-Hant", "zh"].
+ *
+ * @param {string} languageId
+ * @returns {string[]}
+ */
+function getFallbackLanguageKeys(languageId) {
+  const parts = languageId.split('-');
+  const keys = [];
+
+  while (parts.length > 1) {
+    parts.pop();
+    keys.push(parts.join('-'));
+  }
+
+  return keys;
+}
+
+/**
+ * Builds ordered unique lookup candidates for manager resolution.
+ *
+ * @param {string} languageId
+ * @returns {string[]}
+ */
+function buildManagerLookupCandidates(languageId) {
+  const normalised = languageId.replaceAll('_', '-');
+  const expandedCompactLocale = expandCompactLocale(normalised);
+  const baseCandidates = [languageId, normalised, expandedCompactLocale].filter(Boolean);
+
+  const seen = new Set();
+  const orderedCandidates = [];
+
+  for (const candidate of baseCandidates) {
+    if (!seen.has(candidate)) {
+      seen.add(candidate);
+      orderedCandidates.push(candidate);
+    }
+
+    for (const fallbackKey of getFallbackLanguageKeys(candidate)) {
+      if (seen.has(fallbackKey)) continue;
+      seen.add(fallbackKey);
+      orderedCandidates.push(fallbackKey);
+    }
+  }
+
+  return orderedCandidates;
+}
+
+/**
  * Returns the language managers for a given Crowdin language ID.
- * Normalises separators (underscore → hyphen) before lookup.
+ * Normalizes separators (underscore → hyphen), supports compact locale IDs
+ * (e.g. "esES"), and falls back from region variants to base language.
  *
  * @param {string|null|undefined} languageId
  * @returns {Array<{discord: string, crowdin: string, github: string|null}>}
  */
 function getLanguageManagers(languageId) {
   if (!languageId) return [];
-  const normalised = languageId.replace('_', '-');
-  return languageManagers[normalised] ?? languageManagers[languageId] ?? [];
+
+  const candidates = buildManagerLookupCandidates(languageId);
+  for (const candidate of candidates) {
+    const managers = resolveManagersForKey(candidate);
+    if (managers !== undefined) return managers;
+  }
+
+  return [];
 }
 
 /**
