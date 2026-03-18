@@ -474,6 +474,18 @@ describe('buildPinnedIssueBody', () => {
     expect(body).toContain(PINNED_ISSUE_MARKER);
   });
 
+  it('includes manager approval guidance with the Crowdin proofreading link', () => {
+    const body = buildPinnedIssueBody([]);
+    expect(body).toContain('Language managers: approve translations in Crowdin');
+    expect(body).toContain('https://support.crowdin.com/online-editor/#proofreading');
+  });
+
+  it('places approval guidance before the last-updated timestamp', () => {
+    const body = buildPinnedIssueBody([]);
+    expect(body.indexOf('Language managers: approve translations in Crowdin'))
+      .toBeLessThan(body.indexOf('Last updated:'));
+  });
+
   it('includes the project name as a heading', () => {
     const body = buildPinnedIssueBody([{ project: makeProject({ name: 'MyProject' }), entries: [] }]);
     expect(body).toContain('MyProject');
@@ -491,7 +503,7 @@ describe('buildPinnedIssueBody', () => {
       { project: makeProject({ identifier: undefined }), entries: [] },
     ]);
     expect(body).toContain('### TestProject');
-    expect(body).not.toContain('http');
+    expect(body).not.toContain('https://crowdin.com/project/');
   });
 
   it('includes a last-updated timestamp', () => {
