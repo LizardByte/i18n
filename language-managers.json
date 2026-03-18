@@ -21,6 +21,13 @@
       "github": "yungleballz"
     }
   ],
+  "en-US": [
+    {
+      "crowdin": "LizardByte",
+      "discord": "LizardByte-bot",
+      "github": "LizardByte-bot"
+    }
+  ],
   "es": [
     {
       "crowdin": "tatibugatti",
