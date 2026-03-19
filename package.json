@@ -36,6 +36,10 @@
   },
   "scripts": {
     "build": "echo \"No build step required\"",
+    "start:distribution": "node --env-file=.env src/sync-crowdin-distribution.cjs",
+    "start:en-us": "node --env-file=.env src/sync-crowdin-en-us.js",
+    "start:issues": "node --env-file=.env src/sync-crowdin-issues.js",
+    "start:progress": "node --env-file=.env src/crowdin-progress.js",
     "test": "npm-run-all test:schema test:unit test:report test:lint",
     "test:schema": "node src/validate-language-managers.js",
     "test:unit": "jest --coverage",
