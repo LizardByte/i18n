@@ -45,17 +45,34 @@ const GITHUB_REPOSITORY = process.env.GITHUB_REPOSITORY; // "owner/repo"
 
 const SVG_OUTPUT_DIR = process.env.SVG_OUTPUT_DIR ?? '/tmp/crowdin-progress'; // NOSONAR(javascript:S5443)
 
+/**
+ * When `true`, only SVG graphs are generated.  The GitHub label, pinned issue,
+ * and all Octokit calls are completely skipped.  Useful for local development
+ * where GitHub credentials may not be available.
+ *
+ * Set via the environment variable `SVG_ONLY=true`.
+ */
+const SVG_ONLY = (process.env.SVG_ONLY ?? '').toLowerCase() === 'true';
+
 const CROWDIN_PROJECT_IDS = parseCrowdinProjectIds();
 
 /* istanbul ignore next */
 if (_isMain) {
-  validateEnv(['CROWDIN_TOKEN', 'GH_BOT_TOKEN', 'GITHUB_REPOSITORY'], CROWDIN_PROJECT_IDS);
+  const requiredVars = ['CROWDIN_TOKEN'];
+  if (!SVG_ONLY) requiredVars.push('GH_BOT_TOKEN', 'GITHUB_REPOSITORY');
+  validateEnv(requiredVars, CROWDIN_PROJECT_IDS);
 }
 
 const [GH_OWNER, GH_REPO] = (GITHUB_REPOSITORY ?? '/').split('/');
 
 /** Hidden marker used to identify the single pinned progress issue. */
 const PINNED_ISSUE_MARKER = '<!-- crowdin-progress-pinned-issue -->';
+
+/**
+ * Regex that matches Crowdin branch names created by the GitHub integration.
+ * Example: "[LizardByte.sunshine] master"  →  captures "sunshine"
+ */
+const BRANCH_REPO_PATTERN = /^\[LizardByte\.(.+?)\]\s*master$/;
 
 /** Title for the pinned issue. */
 const PINNED_ISSUE_TITLE = 'Crowdin Translation Progress';
@@ -575,20 +592,401 @@ async function fetchAllProjectsProgress(projectIds) {
 function generateAllSvgs(projectsData, outputDir) {
   for (const { project, entries } of projectsData) {
     const name = project.name ?? `Project_${project.id}`;
-    const sorted = sortProgressEntries(entries);
+    // Sort ascending then reverse so best-approved languages appear at the top.
+    const sorted = [...sortProgressEntries(entries)].reverse();
     const filePath = generateProjectSvg(name, sorted, outputDir);
     console.log(`  SVG written: ${filePath}`);
   }
 }
 
+/**
+ * Fetches all branches for a project.
+ *
+ * @param {string|number} projectId
+ * @returns {Promise<object[]>}  Unwrapped Branch data objects.
+ */
+async function fetchProjectBranches(projectId) {
+  const response = await crowdin.sourceFilesApi
+    .withFetchAll()
+    .listProjectBranches(projectId, {});
+  return (response.data ?? []).map((item) => item.data);
+}
+
+/**
+ * Fetches per-language translation progress for a specific branch.
+ *
+ * @param {string|number} projectId
+ * @param {number} branchId
+ * @returns {Promise<object[]>}  Unwrapped LanguageProgress data objects.
+ */
+async function fetchBranchProgress(projectId, branchId) {
+  const response = await crowdin.translationStatusApi
+    .withFetchAll()
+    .getBranchProgress(projectId, branchId, {});
+  return (response.data ?? []).map((item) => item.data);
+}
+
+/**
+ * Fetches all directories for a project.
+ *
+ * @param {string|number} projectId
+ * @returns {Promise<object[]>}  Unwrapped Directory data objects.
+ */
+async function fetchProjectDirectories(projectId) {
+  const response = await crowdin.sourceFilesApi
+    .withFetchAll()
+    .listProjectDirectories(projectId, {});
+  return (response.data ?? []).map((item) => item.data);
+}
+
+/**
+ * Fetches per-language translation progress for a specific directory.
+ *
+ * @param {string|number} projectId
+ * @param {number} directoryId
+ * @returns {Promise<object[]>}  Unwrapped LanguageProgress data objects.
+ */
+async function fetchDirectoryProgress(projectId, directoryId) {
+  const response = await crowdin.translationStatusApi
+    .withFetchAll()
+    .getDirectoryProgress(projectId, directoryId, {});
+  return (response.data ?? []).map((item) => item.data);
+}
+
+/**
+ * Extracts a short GitHub repo name from a Crowdin branch name.
+ *
+ * Matches the GitHub integration pattern "[LizardByte.<repo>] master" and
+ * returns only `<repo>`.  For any other branch name the full name is returned
+ * as-is (e.g. "app.lizardbyte.dev" stays "app.lizardbyte.dev").
+ *
+ * @param {string} branchName
+ * @returns {string}
+ */
+function extractRepoNameFromBranch(branchName) {
+  const match = BRANCH_REPO_PATTERN.exec(branchName);
+  return match ? match[1] : branchName;
+}
+
+/**
+ * Merges multiple LanguageProgress arrays (from different directories/files)
+ * into one array by aggregating word counts per language, then recomputing
+ * percentages.
+ *
+ * @param {object[]} entries  One or more LanguageProgress entries, possibly
+ *   spanning several directories.
+ * @returns {object[]}  One entry per unique language with combined progress.
+ */
+function aggregateLanguageProgress(entries) {
+  /** @type {Map<string, {language: object, wordsTotal: number, wordsTranslated: number, wordsApproved: number}>} */
+  const byLanguage = new Map();
+
+  for (const entry of entries) {
+    const langId = entry.language?.id ?? entry.languageId;
+    if (!langId) continue;
+
+    if (!byLanguage.has(langId)) {
+      byLanguage.set(langId, {
+        language: entry.language ?? null,
+        wordsTotal: 0,
+        wordsTranslated: 0,
+        wordsApproved: 0,
+      });
+    }
+
+    const acc = byLanguage.get(langId);
+    acc.wordsTotal += entry.words?.total ?? 0;
+    acc.wordsTranslated += entry.words?.translated ?? 0;
+    acc.wordsApproved += entry.words?.approved ?? 0;
+  }
+
+  return [...byLanguage.values()].map((acc) => ({
+    language: acc.language,
+    translationProgress: acc.wordsTotal > 0
+      ? Math.round((acc.wordsTranslated / acc.wordsTotal) * 100)
+      : 0,
+    approvalProgress: acc.wordsTotal > 0
+      ? Math.round((acc.wordsApproved / acc.wordsTotal) * 100)
+      : 0,
+  }));
+}
+
+/**
+ * Fetches all source files for a project.
+ *
+ * @param {string|number} projectId
+ * @returns {Promise<object[]>}  Unwrapped File data objects.
+ */
+async function fetchProjectFiles(projectId) {
+  const response = await crowdin.sourceFilesApi
+    .withFetchAll()
+    .listProjectFiles(projectId, {});
+  return (response.data ?? []).map((item) => item.data);
+}
+
+/**
+ * Fetches per-language translation progress for a specific source file.
+ *
+ * @param {string|number} projectId
+ * @param {number} fileId
+ * @returns {Promise<object[]>}  Unwrapped LanguageProgress data objects.
+ */
+async function fetchFileProgress(projectId, fileId) {
+  const response = await crowdin.translationStatusApi
+    .withFetchAll()
+    .getFileProgress(projectId, fileId, {});
+  return (response.data ?? []).map((item) => item.data);
+}
+
+/**
+ * Extracts the GitHub repo name from a Crowdin source file path.
+ *
+ * Files whose path starts with `/projects/<name>/` are attributed to the
+ * `<name>` repository.  All other files (root-level content, etc.) belong
+ * to the `.github` repository.
+ *
+ * Examples:
+ *   `/projects/sunshine/en.json`        → `"sunshine"`
+ *   `/projects/moonlight/deep/path.yml` → `"moonlight"`
+ *   `/contributing.md`                  → `".github"`
+ *   (empty / null)                      → `".github"`
+ *
+ * @param {string|null|undefined} filePath  The `path` field from a Crowdin File object.
+ * @returns {string}
+ */
+function extractRepoNameFromFilePath(filePath) {
+  if (!filePath) return '.github';
+  const match = /^\/projects\/([^/]+)(?:\/|$)/.exec(filePath);
+  return match ? match[1] : '.github';
+}
+
+/**
+ * Extracts the GitHub repo name from a Crowdin source file object.
+ *
+ * Two naming conventions are supported:
+ *
+ * **1. Slash-separated** (GitHub-integration file-based projects):
+ * The repo name is read from the `path` field which follows the Crowdin
+ * project directory structure:
+ *   `file.path = "/projects/sunshine/"` → `"sunshine"`
+ *
+ * **2. Underscore-separated** (website-translator projects):
+ * Crowdin's website translator flattens the page URL into the file *name*
+ * using underscores and a `root_` prefix.  A page at `…/projects/sunshine/page`
+ * produces a file named `root_projects_sunshine_page.json`.  The repo name is
+ * the path component that directly follows `root_projects_`:
+ *   `file.name = "root_projects_sunshine_page.json"` → `"sunshine"`
+ *
+ * Falls back to `".github"` when neither pattern matches (i.e. the file does
+ * not belong to any `/projects/<name>/…` path).
+ *
+ * @param {object} file  A Crowdin File data object (`path` and `name` fields).
+ * @param {string} [fallback='.github']  Value to return when neither pattern matches.
+ * @returns {string}
+ */
+function extractRepoNameFromFile(file, fallback = '.github') {
+  // 1. Slash-separated: concatenate path + name so both directory and filename
+  //    can contribute to the match (e.g. path="/projects/sunshine/", name="en.json").
+  const fullPath = `${file.path ?? ''}${file.name ?? ''}`;
+  const slashMatch = /\/projects\/([^/]+)(?:\/|$)/.exec(fullPath);
+  if (slashMatch) return slashMatch[1];
+
+  // 2. Underscore-separated (website-translator): file name like
+  //    "root_projects_<name>_<rest>.json".
+  const underscoreMatch = /^root_projects_([^_]+)(?:_|$)/.exec(file.name ?? '');
+  if (underscoreMatch) return underscoreMatch[1];
+
+  return fallback;
+}
+
+/**
+ * For projects whose source files are organized by website URL path
+ * (e.g. the LizardByte-docs website-translator project), groups all source
+ * files by their inferred GitHub repository origin and generates one SVG
+ * progress graph per repository.
+ *
+ * Per-file progress is fetched and aggregated across all files that share
+ * the same repo before the SVG is written.
+ *
+ * @param {object}   project    Crowdin project data object.
+ * @param {object[]} files      All source files returned by the Crowdin API.
+ * @param {string}   outputDir  Absolute path to the output directory.
+ * @returns {Promise<void>}
+ */
+async function generateRepoFilesSvgs(project, files, outputDir) {
+  const projectId = project.id;
+  const projectName = project.name ?? `Project_${projectId}`;
+  // Files that don't belong to any /projects/<name>/ sub-tree are attributed to
+  // the project's own identifier (e.g. "app.lizardbyte.dev" for the website
+  // project) rather than the generic ".github" fallback.
+  const defaultRepo = project.identifier ?? '.github';
+
+  if (files.length === 0) {
+    console.log('  No source files found.');
+    return;
+  }
+
+  /** @type {Map<string, object[]>} */
+  const filesByRepo = new Map();
+  for (const file of files) {
+    const repo = extractRepoNameFromFile(file, defaultRepo);
+    if (!filesByRepo.has(repo)) filesByRepo.set(repo, []);
+    filesByRepo.get(repo).push(file);
+  }
+
+  console.log(`  Found files in ${filesByRepo.size} repo(s): ${[...filesByRepo.keys()].join(', ')}`);
+
+  for (const [repo, repoFiles] of filesByRepo) {
+    console.log(`  Fetching progress for ${repoFiles.length} file(s) in "${repo}"...`);
+    const allEntries = [];
+    for (const file of repoFiles) {
+      const entries = await fetchFileProgress(projectId, file.id);
+      allEntries.push(...entries);
+    }
+
+    if (allEntries.length > 0) {
+      const aggregated = aggregateLanguageProgress(allEntries);
+      const sorted = [...sortProgressEntries(aggregated)].reverse();
+      const svgName = `${projectName}_${repo}`;
+      const filePath = generateProjectSvg(svgName, sorted, outputDir);
+      console.log(`  SVG written: ${filePath}`);
+    }
+  }
+}
+
+/**
+ * Regex that matches directory names that look like a hostname / domain
+ * (e.g. `"app.lizardbyte.dev"`).  Used to identify website-translator
+ * directories that live alongside GitHub-integration branches inside the
+ * same Crowdin project.
+ */
+const DOMAIN_DIR_PATTERN = /^[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+$/;
+
+/**
+ * For projects that use Crowdin branches to mirror GitHub repositories,
+ * generates one SVG progress graph per matching branch and writes them to
+ * `outputDir`.
+ *
+ * Only branches whose names match `BRANCH_REPO_PATTERN`
+ * (`[LizardByte.<repo>] master`) are included.
+ *
+ * @param {object}   project    Crowdin project data object.
+ * @param {object[]} branches   All branches returned by the Crowdin API.
+ * @param {string}   outputDir  Absolute path to the output directory.
+ * @returns {Promise<void>}
+ */
+async function generateRepoBranchSvgs(project, branches, outputDir) {
+  const projectId = project.id;
+  const projectName = project.name ?? `Project_${projectId}`;
+
+  const repoBranches = branches.filter(
+    (b) => BRANCH_REPO_PATTERN.test(b.name),
+  );
+
+  if (repoBranches.length === 0) {
+    console.log('  No matching repo branches found.');
+    return;
+  }
+
+  console.log(`  Found ${repoBranches.length} repo branch(es).`);
+
+  for (const branch of repoBranches) {
+    const repoName = extractRepoNameFromBranch(branch.name);
+    console.log(`  Fetching progress for branch "${branch.name}"...`);
+    const entries = await fetchBranchProgress(projectId, branch.id);
+    const sorted = [...sortProgressEntries(entries)].reverse();
+    const svgName = `${projectName}_${repoName}`;
+    const filePath = generateProjectSvg(svgName, sorted, outputDir);
+    console.log(`  SVG written: ${filePath}`);
+  }
+}
+
+/**
+ * For projects that contain both GitHub-integration branches **and**
+ * website-translator content organised as a root-level directory
+ * (e.g. `app.lizardbyte.dev`), generates one SVG progress graph per
+ * matching directory.
+ *
+ * Only directories whose names look like a hostname (contain at least one
+ * dot) are considered.
+ *
+ * @param {object} project    Crowdin project data object.
+ * @param {string} outputDir  Absolute path to the output directory.
+ * @returns {Promise<void>}
+ */
+async function generateRepoDirSvgs(project, outputDir) {
+  const projectId = project.id;
+  const projectName = project.name ?? `Project_${projectId}`;
+
+  const directories = await fetchProjectDirectories(projectId);
+  const domainDirs = directories.filter((d) => DOMAIN_DIR_PATTERN.test(d.name));
+
+  if (domainDirs.length === 0) {
+    console.log('  No domain directories found.');
+    return;
+  }
+
+  console.log(`  Found ${domainDirs.length} domain director${domainDirs.length === 1 ? 'y' : 'ies'}: ${domainDirs.map((d) => d.name).join(', ')}`);
+
+  for (const dir of domainDirs) {
+    console.log(`  Fetching progress for directory "${dir.name}"...`);
+    const entries = await fetchDirectoryProgress(projectId, dir.id);
+    if (entries.length > 0) {
+      const sorted = [...sortProgressEntries(entries)].reverse();
+      const svgName = `${projectName}_${dir.name}`;
+      const filePath = generateProjectSvg(svgName, sorted, outputDir);
+      console.log(`  SVG written: ${filePath}`);
+    }
+  }
+}
+
+/**
+ * Generates per-repository SVG graphs for every project in `projectsData`.
+ *
+ * For projects that expose GitHub-integration branches the branch-based
+ * approach is used (`generateRepoBranchSvgs`).  For all other projects
+ * (e.g. website-translator docs projects) the source file path–based
+ * approach is used (`generateRepoFilesSvgs`), which groups files by the
+ * repo inferred from each file's `/projects/<name>/…` path.
+ *
+ * @param {Array<{project: object, entries: object[]}>} projectsData
+ * @param {string} outputDir
+ * @returns {Promise<void>}
+ */
+async function generateAllRepoSvgs(projectsData, outputDir) {
+  for (const { project } of projectsData) {
+    const projectId = project.id;
+    console.log(`\n  Checking repo sources for project ${projectId} (${project.name ?? ''})...`);
+
+    const branches = await fetchProjectBranches(projectId);
+    const repoBranches = branches.filter(
+      (b) => BRANCH_REPO_PATTERN.test(b.name),
+    );
+
+    if (repoBranches.length > 0) {
+      await generateRepoBranchSvgs(project, branches, outputDir);
+      await generateRepoDirSvgs(project, outputDir);
+    } else {
+      console.log('  No repo branches; using file path–based approach.');
+      const files = await fetchProjectFiles(projectId);
+      await generateRepoFilesSvgs(project, files, outputDir);
+    }
+  }
+}
+
 async function main() {
+  const svgOnly = (process.env.SVG_ONLY ?? '').toLowerCase() === 'true';
+
   console.log('=== Crowdin Progress Sync ===');
+  if (svgOnly) console.log('  Mode: SVG-only (GitHub issue update skipped)');
   console.log(`Repository : ${GITHUB_REPOSITORY}`);
   console.log(`Projects   : ${CROWDIN_PROJECT_IDS.join(', ')}`);
   console.log(`SVG output : ${SVG_OUTPUT_DIR}`);
 
-  console.log('\nEnsuring progress label exists...');
-  await ensureProgressLabel();
+  if (!svgOnly) {
+    console.log('\nEnsuring progress label exists...');
+    await ensureProgressLabel();
+  }
 
   console.log('\nFetching project progress from Crowdin...');
   const projectsData = await fetchAllProjectsProgress(CROWDIN_PROJECT_IDS);
@@ -596,11 +994,16 @@ async function main() {
   console.log('\nGenerating SVG graphs...');
   generateAllSvgs(projectsData, SVG_OUTPUT_DIR);
 
-  console.log('\nBuilding pinned issue body...');
-  const body = buildPinnedIssueBody(projectsData);
+  if (!svgOnly) {
+    console.log('\nBuilding pinned issue body...');
+    const body = buildPinnedIssueBody(projectsData);
 
-  console.log('\nUpserting pinned GitHub issue...');
-  await upsertPinnedIssue(body);
+    console.log('\nUpserting pinned GitHub issue...');
+    await upsertPinnedIssue(body);
+  }
+
+  console.log('\nGenerating per-repository SVG graphs...');
+  await generateAllRepoSvgs(projectsData, SVG_OUTPUT_DIR);
 
   console.log('\n=== Sync complete ===');
 }
@@ -619,6 +1022,7 @@ export {
   PINNED_ISSUE_TITLE,
   PROGRESS_LABEL,
   PROGRESS_LABEL_COLOR,
+  SVG_ONLY,
   BAR_LENGTH,
   SVG_LINE_HEIGHT,
   SVG_BAR_HEIGHT,
@@ -644,5 +1048,19 @@ export {
   upsertPinnedIssue,
   fetchAllProjectsProgress,
   generateAllSvgs,
+  fetchProjectBranches,
+  fetchBranchProgress,
+  fetchProjectDirectories,
+  fetchDirectoryProgress,
+  fetchProjectFiles,
+  fetchFileProgress,
+  extractRepoNameFromBranch,
+  extractRepoNameFromFilePath,
+  extractRepoNameFromFile,
+  aggregateLanguageProgress,
+  generateRepoBranchSvgs,
+  generateRepoFilesSvgs,
+  generateRepoDirSvgs,
+  generateAllRepoSvgs,
   main,
 };

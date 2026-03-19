@@ -151,3 +151,6 @@ junit.xml
 
 # package lock
 package-lock.json
+
+# dist
+dist-pages/
