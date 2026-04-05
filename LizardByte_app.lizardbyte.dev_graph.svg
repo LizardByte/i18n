@@ -1,0 +1,123 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="672">
+<defs>
+<style>
+@import url(https://fonts.googleapis.com/css?family=Open+Sans);
+.svg-font { font-family: "Open Sans", sans-serif; font-size: 12px; fill: #999; }
+</style>
+</defs>
+<g class="svg-font">
+<text x="200" y="18" text-anchor="end">English, United States (en-US)</text>
+<rect x="212" y="6" width="160" height="16" fill="#71C277"/>
+<text x="384" y="18">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="50" text-anchor="end">Czech (cs)</text>
+<rect x="212" y="38" width="160" height="16" fill="#71C277"/>
+<text x="384" y="50">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="82" text-anchor="end">Hungarian (hu)</text>
+<rect x="212" y="70" width="160" height="16" fill="#5D89C3"/>
+<rect x="212" y="70" width="33.6" height="16" fill="#71C277"/>
+<text x="384" y="82">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="114" text-anchor="end">Bulgarian (bg)</text>
+<rect x="212" y="102" width="160" height="16" fill="#5D89C3"/>
+<rect x="212" y="102" width="25.6" height="16" fill="#71C277"/>
+<text x="384" y="114">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="146" text-anchor="end">Polish (pl)</text>
+<rect x="212" y="134" width="160" height="16" fill="#5D89C3"/>
+<rect x="212" y="134" width="8" height="16" fill="#71C277"/>
+<text x="384" y="146">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="178" text-anchor="end">Turkish (tr)</text>
+<rect x="212" y="166" width="160" height="16" fill="#5D89C3"/>
+<rect x="212" y="166" width="6.4" height="16" fill="#71C277"/>
+<text x="384" y="178">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="210" text-anchor="end">Vietnamese (vi)</text>
+<rect x="212" y="198" width="160" height="16" fill="#5D89C3"/>
+<rect x="212" y="198" width="4.8" height="16" fill="#71C277"/>
+<text x="384" y="210">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="242" text-anchor="end">Ukrainian (uk)</text>
+<rect x="212" y="230" width="160" height="16" fill="#5D89C3"/>
+<rect x="212" y="230" width="3.2" height="16" fill="#71C277"/>
+<text x="384" y="242">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="274" text-anchor="end">Swedish (sv-SE)</text>
+<rect x="212" y="262" width="160" height="16" fill="#5D89C3"/>
+<rect x="212" y="262" width="3.2" height="16" fill="#71C277"/>
+<text x="384" y="274">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="306" text-anchor="end">Spanish (es-ES)</text>
+<rect x="212" y="294" width="160" height="16" fill="#5D89C3"/>
+<rect x="212" y="294" width="3.2" height="16" fill="#71C277"/>
+<text x="384" y="306">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="338" text-anchor="end">Italian (it)</text>
+<rect x="212" y="326" width="160" height="16" fill="#5D89C3"/>
+<rect x="212" y="326" width="3.2" height="16" fill="#71C277"/>
+<text x="384" y="338">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="370" text-anchor="end">German (de)</text>
+<rect x="212" y="358" width="160" height="16" fill="#5D89C3"/>
+<rect x="212" y="358" width="3.2" height="16" fill="#71C277"/>
+<text x="384" y="370">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="402" text-anchor="end">Russian (ru)</text>
+<rect x="212" y="390" width="160" height="16" fill="#5D89C3"/>
+<text x="384" y="402">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="434" text-anchor="end">Portuguese, Brazilian (pt-BR)</text>
+<rect x="212" y="422" width="160" height="16" fill="#5D89C3"/>
+<text x="384" y="434">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="466" text-anchor="end">Portuguese (pt-PT)</text>
+<rect x="212" y="454" width="160" height="16" fill="#5D89C3"/>
+<text x="384" y="466">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="498" text-anchor="end">Korean (ko)</text>
+<rect x="212" y="486" width="160" height="16" fill="#5D89C3"/>
+<text x="384" y="498">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="530" text-anchor="end">Japanese (ja)</text>
+<rect x="212" y="518" width="160" height="16" fill="#5D89C3"/>
+<text x="384" y="530">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="562" text-anchor="end">French (fr)</text>
+<rect x="212" y="550" width="160" height="16" fill="#5D89C3"/>
+<text x="384" y="562">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="594" text-anchor="end">English, United Kingdom (en-GB)</text>
+<rect x="212" y="582" width="160" height="16" fill="#5D89C3"/>
+<text x="384" y="594">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="626" text-anchor="end">Chinese Traditional (zh-TW)</text>
+<rect x="212" y="614" width="160" height="16" fill="#5D89C3"/>
+<text x="384" y="626">100%</text>
+</g>
+<g class="svg-font">
+<text x="200" y="658" text-anchor="end">Chinese Simplified (zh-CN)</text>
+<rect x="212" y="646" width="160" height="16" fill="#5D89C3"/>
+<text x="384" y="658">100%</text>
+</g>
+</svg>
