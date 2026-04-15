@@ -20,7 +20,7 @@
     "globals": "17.5.0",
     "jest": "30.3.0",
     "jest-junit": "16.0.0",
-    "npm-run-all2": "5.0.2"
+    "npm-run-all2": "7.0.2"
   },
   "jest": {
     "collectCoverageFrom": [
