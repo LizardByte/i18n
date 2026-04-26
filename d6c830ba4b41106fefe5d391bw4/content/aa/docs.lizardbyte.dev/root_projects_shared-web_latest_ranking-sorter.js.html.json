@@ -1,0 +1,13 @@
+{
+    "* Sorts an array of objects by two keys in descending order.": "crwdns106905:0crwdne106905:0",
+    "} firstKey The primary key to sort by.": "crwdns106907:0crwdne106907:0",
+    "} secondKey The secondary key to sort by, in case the first key is equal.": "crwdns106909:0crwdne106909:0",
+    "} The sorting function that returns a number.": "crwdns106911:0crwdne106911:0",
+    "firstKey, secondKey": "crwdns106913:0crwdne106913:0",
+    "(a[firstKey] > b[firstKey]) {": "crwdns106915:0crwdne106915:0",
+    "(a[firstKey] < b[firstKey]) {": "crwdns106917:0crwdne106917:0",
+    "(a[secondKey] > b[secondKey]) {": "crwdns106919:0crwdne106919:0",
+    "(a[secondKey] < b[secondKey]) {": "crwdns106921:0crwdne106921:0",
+    "= rankingSorter;": "crwdns106923:0crwdne106923:0",
+    "Source: ranking-sorter.js": "crwdns106925:0crwdne106925:0"
+}
