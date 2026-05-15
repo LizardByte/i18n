@@ -149,8 +149,5 @@ vite.config.ts.timestamp-*
 # JUnit test reports
 junit.xml
 
-# package lock
-package-lock.json
-
 # dist
 dist-pages/

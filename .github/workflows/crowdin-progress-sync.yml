@@ -51,7 +51,7 @@ jobs:
           node-version: 'node'
 
       - name: Install dependencies
-        run: npm install --ignore-scripts
+        run: npm ci --ignore-scripts
 
       - name: Sync Crowdin progress
         env:
