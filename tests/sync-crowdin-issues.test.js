@@ -201,7 +201,7 @@ describe('buildIssueTitle', () => {
 
   it('truncates long text to 72 characters', () => {
     const issue = { text: 'a'.repeat(100) };
-    expect(buildIssueTitle(issue).length).toBe(72);
+    expect(buildIssueTitle(issue)).toHaveLength(72);
   });
 
   it('collapses newlines to spaces', () => {

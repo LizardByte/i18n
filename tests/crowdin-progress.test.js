@@ -505,7 +505,7 @@ describe('buildProjectTable', () => {
   it('produces an empty table body when entries array is empty', () => {
     const table = buildProjectTable(makeProject(), []);
     const lines = table.split('\n');
-    expect(lines.length).toBe(2);
+    expect(lines).toHaveLength(2);
   });
 
   it('handles an entry with null language gracefully', () => {
