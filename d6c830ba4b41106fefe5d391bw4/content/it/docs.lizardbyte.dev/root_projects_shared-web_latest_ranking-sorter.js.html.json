@@ -1,0 +1,13 @@
+{
+    "* Sorts an array of objects by two keys in descending order.": "* Sorts an array of objects by two keys in descending order.",
+    "} firstKey The primary key to sort by.": "} firstKey The primary key to sort by.",
+    "} secondKey The secondary key to sort by, in case the first key is equal.": "} secondKey The secondary key to sort by, in case the first key is equal.",
+    "} The sorting function that returns a number.": "} The sorting function that returns a number.",
+    "firstKey, secondKey": "firstKey, secondKey",
+    "(a[firstKey] > b[firstKey]) {": "(a[firstKey] > b[firstKey]) {",
+    "(a[firstKey] < b[firstKey]) {": "(a[firstKey] < b[firstKey]) {",
+    "(a[secondKey] > b[secondKey]) {": "(a[secondKey] > b[secondKey]) {",
+    "(a[secondKey] < b[secondKey]) {": "(a[secondKey] < b[secondKey]) {",
+    "= rankingSorter;": "= rankingSorter;",
+    "Source: ranking-sorter.js": "Source: ranking-sorter.js"
+}
