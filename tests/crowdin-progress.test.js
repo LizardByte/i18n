@@ -505,7 +505,7 @@ describe('buildProjectTable', () => {
   it('produces an empty table body when entries array is empty', () => {
     const table = buildProjectTable(makeProject(), []);
     const lines = table.split('\n');
-    expect(lines.length).toBe(2);
+    expect(lines).toHaveLength(2);
   });
 
   it('handles an entry with null language gracefully', () => {
@@ -665,25 +665,30 @@ describe('generateProjectSvg', () => {
     expect(content).toContain('#71C277');
   });
 
-  it('omits the translation bar when approvalProgress is 100', () => {
-    const entries = [makeEntry({ translationProgress: 100, approvalProgress: 100 })];
+  it.each([
+    {
+      name: 'omits the translation bar when approvalProgress is 100',
+      translationProgress: 100,
+      approvalProgress: 100,
+      unexpectedContent: '#5D89C3',
+    },
+    {
+      name: 'omits background track when translationProgress is 100',
+      translationProgress: 100,
+      approvalProgress: 50,
+      unexpectedContent: 'opacity="0.3"',
+    },
+    {
+      name: 'omits approval bar when approvalProgress is 0',
+      translationProgress: 50,
+      approvalProgress: 0,
+      unexpectedContent: '#71C277',
+    },
+  ])('$name', ({ translationProgress, approvalProgress, unexpectedContent }) => {
+    const entries = [makeEntry({ translationProgress, approvalProgress })];
     generateProjectSvg('Proj', entries, SVG_TEST_OUT);
     const [, content] = fs.writeFileSync.mock.calls[0];
-    expect(content).not.toContain('#5D89C3');
-  });
-
-  it('omits background track when translationProgress is 100', () => {
-    const entries = [makeEntry({ translationProgress: 100, approvalProgress: 50 })];
-    generateProjectSvg('Proj', entries, SVG_TEST_OUT);
-    const [, content] = fs.writeFileSync.mock.calls[0];
-    expect(content).not.toContain('opacity="0.3"');
-  });
-
-  it('omits approval bar when approvalProgress is 0', () => {
-    const entries = [makeEntry({ translationProgress: 50, approvalProgress: 0 })];
-    generateProjectSvg('Proj', entries, SVG_TEST_OUT);
-    const [, content] = fs.writeFileSync.mock.calls[0];
-    expect(content).not.toContain('#71C277');
+    expect(content).not.toContain(unexpectedContent);
   });
 
   it('generates an empty SVG body when entries is empty', () => {
@@ -1671,19 +1676,13 @@ describe('main', () => {
       expect(mockPaginate).not.toHaveBeenCalled();
     });
 
-    it('still generates SVG graphs', async () => {
+    it.each([
+      { name: 'still generates SVG graphs', logMessage: 'SVG graphs' },
+      { name: 'logs the SVG-only mode message', logMessage: 'SVG-only' },
+      { name: 'completes successfully without GitHub credentials', logMessage: 'Sync complete' },
+    ])('$name', async ({ logMessage }) => {
       await main();
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('SVG graphs'));
-    });
-
-    it('logs the SVG-only mode message', async () => {
-      await main();
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('SVG-only'));
-    });
-
-    it('completes successfully without GitHub credentials', async () => {
-      await main();
-      expect(console.log).toHaveBeenCalledWith(expect.stringContaining('Sync complete'));
+      expect(console.log).toHaveBeenCalledWith(expect.stringContaining(logMessage));
     });
   });
 });

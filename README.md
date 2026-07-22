@@ -1,12 +1,17 @@
 <div align="center">
+  <img
+    src="https://raw.githubusercontent.com/LizardByte/.github/refs/heads/master/branding/logos/logo.svg"
+    alt="LizardByte icon"
+    width="256"
+  />
   <h1 align="center">i18n</h1>
   <h4 align="center">Automations for LizardByte Crowdin projects.</h4>
 </div>
 
 <div align="center">
   <a href="https://github.com/LizardByte/i18n/actions/workflows/_ci-node.yml?query=branch%3Amaster"><img src="https://img.shields.io/github/actions/workflow/status/lizardbyte/i18n/_ci-node.yml.svg?branch=master&label=CI%20build&logo=github&style=for-the-badge" alt="GitHub Workflow Status (CI)"></a>
-  <a href="https://codecov.io/gh/LizardByte/i18n"><img src="https://img.shields.io/codecov/c/gh/LizardByte/i18n?token=98qpC83uM0&style=for-the-badge&logo=codecov&label=codecov" alt="Codecov"></a>
-  <a href="https://sonarcloud.io/project/overview?id=LizardByte_i18n"><img src="https://img.shields.io/sonar/quality_gate/LizardByte_i18n?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonar&label=sonarcloud" alt="SonarCloud"></a>
+  <a href="https://codecov.io/gh/LizardByte/i18n"><img src="https://img.shields.io/endpoint?url=https%3A%2F%2Fapp.lizardbyte.dev%2Fdashboard%2Fshields%2Fcodecov%2Fi18n.json&style=for-the-badge&logo=codecov" alt="Codecov"></a>
+  <a href="https://sonarcloud.io/project/overview?id=LizardByte_i18n"><img src="https://img.shields.io/sonar/quality_gate/LizardByte_i18n?server=https%3A%2F%2Fsonarcloud.io&style=for-the-badge&logo=sonarqubecloud&label=sonarcloud" alt="SonarCloud"></a>
 </div>
 
 <div align="center">
