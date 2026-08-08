@@ -1,0 +1,11 @@
+{
+    "* Sleep for a given amount of time.": "crwdns107890:0crwdne107890:0",
+    "} ms The time to sleep in milliseconds.": "crwdns107892:0crwdne107892:0",
+    "Promise<unknown>": "crwdns107894:0crwdne107894:0",
+    "} A promise that resolves after the given time.": "crwdns107896:0crwdne107896:0",
+    "Promise": "crwdns107898:0crwdne107898:0",
+    "resolve": "crwdns107900:0crwdne107900:0",
+    "(resolve, ms));": "crwdns107902:0crwdne107902:0",
+    "= sleep;": "crwdns107904:0crwdne107904:0",
+    "Source: sleep.js": "crwdns107906:0crwdne107906:0"
+}

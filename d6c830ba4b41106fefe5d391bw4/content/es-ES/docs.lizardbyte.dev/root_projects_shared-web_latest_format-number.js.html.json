@@ -1,0 +1,22 @@
+{
+    "* Format a number to a human-readable string.": "* Format a number to a human-readable string.",
+    "@param": "@param",
+    "} num The number to format.": "} num The number to format.",
+    "} decimalPlaces The number of decimal places to include in the formatted string.": "} decimalPlaces The number of decimal places to include in the formatted string.",
+    "} The formatted number as a string with suffix (k, M, etc.).": "} The formatted number as a string with suffix (k, M, etc.).",
+    "num, decimalPlaces =": "num, decimalPlaces =",
+    "(num >=": "(num >=",
+    "(num /": "(num /",
+    "toFixed": "toFixed",
+    "(decimalPlaces) +": "(decimalPlaces) +",
+    "'M'": "'M'",
+    "else": "else",
+    "'k'": "'k'",
+    "num.": "num.",
+    "toString": "toString",
+    "// Expose to the global scope": "// Expose to the global scope",
+    "typeof": "typeof",
+    "'undefined'": "'undefined'",
+    "= formatNumber;": "= formatNumber;",
+    "Source: format-number.js": "Source: format-number.js"
+}
