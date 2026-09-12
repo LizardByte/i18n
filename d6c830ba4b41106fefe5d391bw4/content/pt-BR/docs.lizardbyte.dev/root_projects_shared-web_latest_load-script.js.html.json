@@ -1,0 +1,23 @@
+{
+    "* Load a script asynchronously, and add it to the DOM. Optionally, call a callback when the script has loaded.": "* Load a script asynchronously, and add it to the DOM. Optionally, call a callback when the script has loaded.",
+    "} url The URL of the script to load.": "} url The URL of the script to load.",
+    "Function": "Function",
+    "} callback An optional callback to call when the script has loaded.": "} callback An optional callback to call when the script has loaded.",
+    "url, callback": "url, callback",
+    "script =": "script =",
+    "'script'": "'script'",
+    "script.": "script.",
+    "src": "src",
+    "= url;": "= url;",
+    "true": "true",
+    "onload": "onload",
+    "(callback)": "(callback)",
+    ", script);": ", script);",
+    "onerror": "onerror",
+    "Error": "Error",
+    "`Failed to load script:": "`Failed to load script:",
+    "${url}": "${url}",
+    "(script);": "(script);",
+    "= loadScript;": "= loadScript;",
+    "Source: load-script.js": "Source: load-script.js"
+}
