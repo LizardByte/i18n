@@ -1,0 +1,11 @@
+{
+    "* Sleep for a given amount of time.": "* Сон протягом певного часу.",
+    "} ms The time to sleep in milliseconds.": "} ms Час до сну в мілісекундах.",
+    "Promise<unknown>": "Обіцянка<unknown>",
+    "} A promise that resolves after the given time.": "} Обіцянка, яка вирішується через певний час.",
+    "Promise": "Обіцянка",
+    "resolve": "вирішує",
+    "(resolve, ms));": "(resolve, ms));",
+    "= sleep;": "= sleep;",
+    "Source: sleep.js": "Вихідний код: sleep.js"
+}

@@ -1,0 +1,11 @@
+{
+    "* Sleep for a given amount of time.": "* Pause pour un temps donné.",
+    "} ms The time to sleep in milliseconds.": "} ms Le temps de pause en millisecondes.",
+    "Promise<unknown>": "Promise<unknown>",
+    "} A promise that resolves after the given time.": "} Une promesse qui se résout après le temps donné.",
+    "Promise": "Promise",
+    "resolve": "resolve",
+    "(resolve, ms));": "(resolve, ms));",
+    "= sleep;": "= sleep;",
+    "Source: sleep.js": "Source: sleep.js"
+}

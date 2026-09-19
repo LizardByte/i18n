@@ -1,0 +1,22 @@
+{
+    "* Format a number to a human-readable string.": "crwdns106359:0crwdne106359:0",
+    "@param": "crwdns106361:0crwdne106361:0",
+    "} num The number to format.": "crwdns106363:0crwdne106363:0",
+    "} decimalPlaces The number of decimal places to include in the formatted string.": "crwdns106365:0crwdne106365:0",
+    "} The formatted number as a string with suffix (k, M, etc.).": "crwdns106367:0crwdne106367:0",
+    "num, decimalPlaces =": "crwdns106369:0crwdne106369:0",
+    "(num >=": "crwdns106371:0crwdne106371:0",
+    "(num /": "crwdns106373:0crwdne106373:0",
+    "toFixed": "crwdns106375:0crwdne106375:0",
+    "(decimalPlaces) +": "crwdns106377:0crwdne106377:0",
+    "'M'": "crwdns106379:0crwdne106379:0",
+    "else": "crwdns106381:0crwdne106381:0",
+    "'k'": "crwdns106383:0crwdne106383:0",
+    "num.": "crwdns106385:0crwdne106385:0",
+    "toString": "crwdns106387:0crwdne106387:0",
+    "// Expose to the global scope": "crwdns106389:0crwdne106389:0",
+    "typeof": "crwdns106391:0crwdne106391:0",
+    "'undefined'": "crwdns106393:0crwdne106393:0",
+    "= formatNumber;": "crwdns106395:0crwdne106395:0",
+    "Source: format-number.js": "crwdns106397:0crwdne106397:0"
+}
