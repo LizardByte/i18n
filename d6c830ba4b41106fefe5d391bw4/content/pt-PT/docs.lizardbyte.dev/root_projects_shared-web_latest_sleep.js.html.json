@@ -1,0 +1,11 @@
+{
+    "* Sleep for a given amount of time.": "* Sleep for a given amount of time.",
+    "} ms The time to sleep in milliseconds.": "} ms The time to sleep in milliseconds.",
+    "Promise<unknown>": "Promise<unknown>",
+    "} A promise that resolves after the given time.": "} A promise that resolves after the given time.",
+    "Promise": "Promise",
+    "resolve": "resolve",
+    "(resolve, ms));": "(resolve, ms));",
+    "= sleep;": "= sleep;",
+    "Source: sleep.js": "Source: sleep.js"
+}
