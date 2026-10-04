@@ -952,6 +952,31 @@ describe('fetchAllProjectsProgress', () => {
     expect(result[0].entries).toHaveLength(1);
   });
 
+  it('fetches at most eight projects concurrently and keeps their input order', async () => {
+    const ids = Array.from({ length: 9 }, (_, i) => String(i + 1));
+    const gates = ids.map(() => Promise.withResolvers());
+    const batchStarted = Promise.withResolvers();
+    mockListProjects.mockResolvedValue({ data: [] });
+    mockGetProjectProgress.mockImplementation((id) => {
+      if (mockGetProjectProgress.mock.calls.length === 8) batchStarted.resolve();
+      return gates[Number(id) - 1].promise;
+    });
+
+    const pending = fetchAllProjectsProgress(ids);
+    await batchStarted.promise;
+    expect(mockGetProjectProgress).toHaveBeenCalledTimes(8);
+
+    // Resolve in reverse order to ensure results still match the requested IDs.
+    for (const id of ids.toReversed()) {
+      gates[Number(id) - 1].resolve({ data: [{ data: { languageId: id } }] });
+    }
+
+    const result = await pending;
+    expect(result.map(({ project }) => project.id)).toEqual(ids);
+    expect(result.map(({ entries }) => entries[0].languageId)).toEqual(ids);
+    expect(mockGetProjectProgress).toHaveBeenCalledTimes(9);
+  });
+
   it('uses a placeholder project when project ID is not in the list response', async () => {
     mockListProjects.mockResolvedValue({ data: [] });
     mockGetProjectProgress.mockResolvedValue({ data: [] });

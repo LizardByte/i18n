@@ -1073,6 +1073,31 @@ describe('syncProject', () => {
   });
 
 
+  it('finishes each GitHub write and its pause before starting the next issue', async () => {
+    const first = makeCrowdinIssue({ id: 5 });
+    const second = makeCrowdinIssue({ id: 6 });
+    mockListStringCommentsStable.mockResolvedValue({ data: [{ data: first }, { data: second }] });
+    mockCreate
+      .mockResolvedValueOnce({ data: { number: 20, state: 'open' } })
+      .mockResolvedValueOnce({ data: { number: 21, state: 'open' } });
+
+    const map = new Map();
+    const pending = syncProject('42', map);
+    await jest.advanceTimersByTimeAsync(0);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(map.has('42:5')).toBe(true);
+    expect(map.has('42:6')).toBe(false);
+
+    await jest.advanceTimersByTimeAsync(499);
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    await jest.advanceTimersByTimeAsync(1);
+    expect(mockCreate).toHaveBeenCalledTimes(2);
+    expect(map.has('42:6')).toBe(true);
+
+    await jest.runAllTimersAsync();
+    await pending;
+  });
+
   it('creates a new GH issue for an unresolved Crowdin issue not in the map', async () => {
     const issue = makeCrowdinIssue({ id: 5, issueStatus: 'unresolved' });
     mockListStringCommentsStable.mockResolvedValue({ data: [{ data: issue }] });

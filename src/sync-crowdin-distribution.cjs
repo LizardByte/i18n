@@ -17,6 +17,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
 const { promisify } = require('node:util');
+const { processInBatches } = require('./batches.cjs');
 
 const gunzip = promisify(zlib.gunzip);
 
@@ -98,19 +99,6 @@ function saveFile(filePath, data) {
 }
 
 /**
- * Processes an array of items in fixed-size concurrent batches.
- * @template T
- * @param {T[]} items
- * @param {number} batchSize
- * @param {(item: T) => Promise<void>} fn
- */
-async function processInBatches(items, batchSize, fn) {
-  for (let i = 0; i < items.length; i += batchSize) {
-    await Promise.all(items.slice(i, i + batchSize).map(fn));
-  }
-}
-
-/**
  * Downloads all distribution files for a single hash.
  * @param {string} hash  Distribution hash.
  * @param {string} [outputDir]  Override for the output directory (defaults to OUTPUT_DIR).
@@ -179,7 +167,8 @@ async function main() {
   fs.mkdirSync(OUTPUT_DIR, { recursive: true });
 
   let allOk = true;
-  for (const hash of DISTRIBUTIONS) {
+  // Keep distributions sequential so their download batches share one limit.
+  await processInBatches(DISTRIBUTIONS, 1, async (hash) => {
     try {
       const ok = await syncDistribution(hash);
       if (!ok) allOk = false;
@@ -187,7 +176,7 @@ async function main() {
       console.error(`\nFATAL: Failed to sync ${hash}:`, err.message);
       allOk = false;
     }
-  }
+  });
 
   if (!allOk) {
     console.error('\nSync completed with errors.');
@@ -198,7 +187,10 @@ async function main() {
 
 /* istanbul ignore next */
 if (_isMain) {
-  main();
+  main().catch((err) => {
+    console.error(err.message);
+    process.exit(1);
+  });
 }
 
 // Exports for unit testing

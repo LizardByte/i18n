@@ -25,6 +25,7 @@
 import { fileURLToPath } from 'node:url';
 import { Client as CrowdinClient } from '@crowdin/crowdin-api-client';
 import { parseCrowdinProjectIds, validateEnv } from './common.js';
+import { processInBatches } from './batches.cjs';
 
 // Determine whether this module is being run directly.
 const _isMain = process.argv[1] === fileURLToPath(import.meta.url);
@@ -253,7 +254,8 @@ async function syncStringTranslation(projectId, sourceString) {
     existingByCategory.set(t.pluralCategoryName ?? null, t);
   }
 
-  for (const { pluralCategoryName, text: expectedText } of expectedEntries) {
+  // Keep translation replacement and approval writes ordered.
+  await processInBatches(expectedEntries, 1, async ({ pluralCategoryName, text: expectedText }) => {
     const existing = existingByCategory.get(pluralCategoryName) ?? null;
     const translationId = await ensureTranslation(
       projectId, stringId, expectedText, pluralCategoryName, existing,
@@ -266,7 +268,7 @@ async function syncStringTranslation(projectId, sourceString) {
       await approveTranslation(projectId, translationId);
       console.log(`  ✔  ${prefix}: approved`);
     }
-  }
+  });
 }
 
 /**
@@ -296,13 +298,13 @@ async function syncProject(projectId) {
   }
 
   let skipped = 0;
-  for (const string of strings) {
+  await processInBatches(strings, 1, async (string) => {
     if (isFullyApproved(string, approvedCategoriesByStringId)) {
       skipped++;
-      continue;
+      return;
     }
     await syncStringTranslation(projectId, string);
-  }
+  });
 
   if (skipped > 0) {
     console.log(`  ${skipped} string(s) skipped (already fully approved).`);
@@ -315,9 +317,7 @@ async function main() {
   console.log('=== Crowdin en_US Translation Sync ===');
   console.log(`Projects : ${CROWDIN_PROJECT_IDS.join(', ')}`);
 
-  for (const projectId of CROWDIN_PROJECT_IDS) {
-    await syncProject(projectId);
-  }
+  await processInBatches(CROWDIN_PROJECT_IDS, 1, syncProject);
 
   console.log('\n=== Sync complete ===');
 }
