@@ -29,6 +29,10 @@ import path from 'node:path';
 import { Client as CrowdinClient } from '@crowdin/crowdin-api-client';
 import { Octokit } from '@octokit/rest';
 import { parseCrowdinProjectIds, validateEnv } from './common.js';
+import { processInBatches } from './batches.cjs';
+
+/** Maximum number of independent Crowdin progress reads in each batch. */
+const PROGRESS_CONCURRENCY = 8;
 
 const _require = createRequire(import.meta.url);
 /** @type {Record<string, Array<{discord: string, crowdin: string, github: string|null}>>} */
@@ -570,17 +574,15 @@ async function fetchAllProjectsProgress(projectIds) {
   const allProjects = await fetchProjects();
   const projectMap = new Map(allProjects.map((p) => [String(p.id), p]));
 
-  const results = [];
-  for (const id of projectIds) {
+  return processInBatches(projectIds, PROGRESS_CONCURRENCY, async (id) => {
     const project = projectMap.get(String(id)) ?? { id, name: `Project ${id}` };
     console.log(`\nProject ${id} (${project.name})`);
 
     const entries = await fetchProjectProgress(id);
     console.log(`  ${entries.length} language(s) found.`);
 
-    results.push({ project, entries });
-  }
-  return results;
+    return { project, entries };
+  });
 }
 
 /**
@@ -836,13 +838,13 @@ async function generateRepoFilesSvgs(project, files, outputDir) {
 
   console.log(`  Found files in ${filesByRepo.size} repo(s): ${[...filesByRepo.keys()].join(', ')}`);
 
-  for (const [repo, repoFiles] of filesByRepo) {
+  // Process repositories one at a time so file batches share the concurrency cap.
+  await processInBatches([...filesByRepo], 1, async ([repo, repoFiles]) => {
     console.log(`  Fetching progress for ${repoFiles.length} file(s) in "${repo}"...`);
-    const allEntries = [];
-    for (const file of repoFiles) {
-      const entries = await fetchFileProgress(projectId, file.id);
-      allEntries.push(...entries);
-    }
+    const entriesByFile = await processInBatches(repoFiles, PROGRESS_CONCURRENCY, (file) =>
+      fetchFileProgress(projectId, file.id),
+    );
+    const allEntries = entriesByFile.flat();
 
     if (allEntries.length > 0) {
       const aggregated = aggregateLanguageProgress(allEntries);
@@ -851,7 +853,7 @@ async function generateRepoFilesSvgs(project, files, outputDir) {
       const filePath = generateProjectSvg(svgName, sorted, outputDir);
       console.log(`  SVG written: ${filePath}`);
     }
-  }
+  });
 }
 
 /**
@@ -890,7 +892,7 @@ async function generateRepoBranchSvgs(project, branches, outputDir) {
 
   console.log(`  Found ${repoBranches.length} repo branch(es).`);
 
-  for (const branch of repoBranches) {
+  await processInBatches(repoBranches, PROGRESS_CONCURRENCY, async (branch) => {
     const repoName = extractRepoNameFromBranch(branch.name);
     console.log(`  Fetching progress for branch "${branch.name}"...`);
     const entries = await fetchBranchProgress(projectId, branch.id);
@@ -898,7 +900,7 @@ async function generateRepoBranchSvgs(project, branches, outputDir) {
     const svgName = `${projectName}_${repoName}`;
     const filePath = generateProjectSvg(svgName, sorted, outputDir);
     console.log(`  SVG written: ${filePath}`);
-  }
+  });
 }
 
 /**
@@ -928,7 +930,7 @@ async function generateRepoDirSvgs(project, outputDir) {
 
   console.log(`  Found ${domainDirs.length} domain director${domainDirs.length === 1 ? 'y' : 'ies'}: ${domainDirs.map((d) => d.name).join(', ')}`);
 
-  for (const dir of domainDirs) {
+  await processInBatches(domainDirs, PROGRESS_CONCURRENCY, async (dir) => {
     console.log(`  Fetching progress for directory "${dir.name}"...`);
     const entries = await fetchDirectoryProgress(projectId, dir.id);
     if (entries.length > 0) {
@@ -937,7 +939,7 @@ async function generateRepoDirSvgs(project, outputDir) {
       const filePath = generateProjectSvg(svgName, sorted, outputDir);
       console.log(`  SVG written: ${filePath}`);
     }
-  }
+  });
 }
 
 /**
@@ -954,7 +956,8 @@ async function generateRepoDirSvgs(project, outputDir) {
  * @returns {Promise<void>}
  */
 async function generateAllRepoSvgs(projectsData, outputDir) {
-  for (const { project } of projectsData) {
+  // Each project owns its batches and SVG filenames; finish it before the next.
+  await processInBatches(projectsData, 1, async ({ project }) => {
     const projectId = project.id;
     console.log(`\n  Checking repo sources for project ${projectId} (${project.name ?? ''})...`);
 
@@ -971,7 +974,7 @@ async function generateAllRepoSvgs(projectsData, outputDir) {
       const files = await fetchProjectFiles(projectId);
       await generateRepoFilesSvgs(project, files, outputDir);
     }
-  }
+  });
 }
 
 async function main() {

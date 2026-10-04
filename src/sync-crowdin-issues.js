@@ -37,6 +37,7 @@ import { createRequire } from 'node:module';
 import { Client as CrowdinClient } from '@crowdin/crowdin-api-client';
 import { Octokit } from '@octokit/rest';
 import { parseCrowdinProjectIds, validateEnv } from './common.js';
+import { processInBatches } from './batches.cjs';
 
 const _require = createRequire(import.meta.url);
 /** @type {Record<string, Array<{discord: string, crowdin: string, github: string|null}>>} */
@@ -326,9 +327,9 @@ async function ensureIssueLabels(crowdinIssue) {
   const typeName = TYPE_MAP[crowdinIssue.issueType] ?? crowdinIssue.issueType;
   await ensureLabel(typeLabel, TYPE_LABEL_COLOR, typeName);
 
-  for (const langLabel of getLanguageLabels(crowdinIssue.languageId)) {
-    await ensureLabel(langLabel, LANG_LABEL_COLOR, `Language: ${langLabel.slice(5)}`);
-  }
+  await processInBatches(getLanguageLabels(crowdinIssue.languageId), 1, (langLabel) =>
+    ensureLabel(langLabel, LANG_LABEL_COLOR, `Language: ${langLabel.slice(5)}`),
+  );
 }
 
 /**
@@ -544,7 +545,8 @@ async function syncProject(projectId, existingMap) {
   ]);
   console.log(`  ${issues.length} issue(s) found in Crowdin.`);
 
-  for (const issue of issues) {
+  // Serialize GitHub writes, including the pause between issues.
+  await processInBatches(issues, 1, async (issue) => {
     const key = `${projectId}:${issue.id}`;
     const ghIssue = existingMap.get(key);
 
@@ -556,7 +558,7 @@ async function syncProject(projectId, existingMap) {
 
     // Brief pause to stay well within GitHub's secondary rate limits.
     await new Promise((r) => setTimeout(r, 500));
-  }
+  });
 }
 
 // Entry point
@@ -573,9 +575,9 @@ async function main() {
   const existingMap = await loadExistingGithubIssues();
   console.log(`  ${existingMap.size} issue(s) already tracked.`);
 
-  for (const projectId of CROWDIN_PROJECT_IDS) {
-    await syncProject(projectId, existingMap);
-  }
+  await processInBatches(CROWDIN_PROJECT_IDS, 1, (projectId) =>
+    syncProject(projectId, existingMap),
+  );
 
   console.log('\n=== Sync complete ===');
 }

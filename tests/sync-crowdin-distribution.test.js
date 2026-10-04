@@ -132,6 +132,32 @@ describe('saveFile', () => {
 
 // Shared test helpers
 
+describe('distribution CLI', () => {
+  it('reports startup failures and exits without an unhandled rejection stack', () => {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const os = require('node:os');
+    const { spawnSync } = require('node:child_process');
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crowdin-cli-test-'));
+    const outputFile = path.join(tmpDir, 'output-file');
+    fs.writeFileSync(outputFile, 'existing file');
+
+    try {
+      const result = spawnSync(process.execPath, [path.resolve('src/sync-crowdin-distribution.cjs')], {
+        encoding: 'utf8',
+        env: { ...process.env, CROWDIN_DISTRIBUTION_IDS: 'test-hash', OUTPUT_DIR: outputFile },
+      });
+
+      expect(result.error).toBeUndefined();
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('EEXIST');
+      expect(result.stderr.trim().split(/\r?\n/)).toHaveLength(1);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
 const { EventEmitter } = require('node:events');
 
 /**
