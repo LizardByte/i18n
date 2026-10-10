@@ -1,0 +1,13 @@
+{
+    "* Sorts an array of objects by two keys in descending order.": "* Сортує масив об'єктів за двома ключами у порядку спадання.",
+    "} firstKey The primary key to sort by.": "} firstKey Первинний ключ для сортування.",
+    "} secondKey The secondary key to sort by, in case the first key is equal.": "} secondKey Вторинний ключ для сортування, якщо перший ключ є рівним.",
+    "} The sorting function that returns a number.": "} Функція сортування, яка повертає число.",
+    "firstKey, secondKey": "firstKey, secondKey",
+    "(a[firstKey] > b[firstKey]) {": "(a[firstKey] > b[firstKey]) {",
+    "(a[firstKey] < b[firstKey]) {": "(a[firstKey] < b[firstKey]) {",
+    "(a[secondKey] > b[secondKey]) {": "(a[secondKey] > b[secondKey]) {",
+    "(a[secondKey] < b[secondKey]) {": "(a[secondKey] < b[secondKey]) {",
+    "= rankingSorter;": "= rankingSorter;",
+    "Source: ranking-sorter.js": "Вихідний код: ranking-sorter.js"
+}
