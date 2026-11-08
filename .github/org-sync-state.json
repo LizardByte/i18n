@@ -29,12 +29,12 @@
     },
     ".github/workflows/_top-issues.yml": {
       "mode": "sync",
-      "sha": "3072822c6a6832079de60fe8940953e008da165f",
+      "sha": "83a8bf0617b59cdb96245bac71232aabbb620d14",
       "permissions": "100644"
     },
     ".github/workflows/_update-npm.yml": {
       "mode": "sync",
-      "sha": "a267db1079e9945f8a36306e2d2afb172efe268d",
+      "sha": "018a5a8f6a7b80bf224c8ead0976a91f37193f24",
       "permissions": "100644"
     },
     "renovate.json": {
